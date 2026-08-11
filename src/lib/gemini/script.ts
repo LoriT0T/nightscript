@@ -68,8 +68,11 @@ lines: a re-voicing of the same ideas as the core section, but softer, shorter a
 more heavily to self-compassion and permitted ambivalence. Not verbatim repeats — the gentler
 version of the same thoughts. Seven to eleven words. Carry the goalId.`,
 
-  dissolution: (n) => `Write ${n} DISSOLUTION lines. Fragments, not sentences. Three to six words.
-"Softer now." "Still here." "Nothing to fix tonight." Sparse and trailing. goalId null.`,
+  dissolution: (n) => `Write ${n} DISSOLUTION lines. Fragments, not sentences. Three to six words
+each, no full stops needed. Sparse and trailing. goalId null. They should feel like the last
+thoughts of the day thinning out. Do NOT use the words "softer now", "still here" or "nothing to
+fix tonight" — those are the shape, not the content. Draw the fragments from this listener's own
+material where you can.`,
 };
 
 /**

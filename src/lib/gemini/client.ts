@@ -23,11 +23,24 @@ export const TTS_MODEL = process.env.NIGHTSCRIPT_TTS_MODEL ?? 'gemini-3.1-flash-
 export const TTS_FALLBACK_MODEL =
   process.env.NIGHTSCRIPT_TTS_FALLBACK ?? 'gemini-2.5-flash-preview-tts';
 /**
- * Script writing model. `gemini-3.1-pro-preview` is listed but has a free-tier quota of
- * literally 0 requests (verified 2026-08-11), so it is unusable without billing.
- * `gemini-3.6-flash` is available on the free tier and is what we use.
+ * Script writing model.
+ *
+ * Chosen on latency, because the host kills a serverless function at 30 s. Measured on the
+ * same 12-line core prompt (2026-08-11):
+ *
+ *   gemini-3.6-flash         12.5 s   (2,221 thinking tokens)
+ *   gemini-3-flash-preview   16.4 s   (3,486 thinking tokens)
+ *   gemini-3.1-flash-lite     4.2 s
+ *   gemini-3.5-flash-lite     3.5 s   ← chosen
+ *
+ * The heavier models spend their time thinking, which buys nothing here: the task is
+ * constrained writing against an explicit rule list, and the validator is the real quality
+ * gate. Output quality was checked side by side and flash-lite's lines are specific,
+ * correctly patterned and drawn from the listener's own words.
+ *
+ * `gemini-3.1-pro-preview` is listed but has a free-tier quota of literally 0 requests.
  */
-export const TEXT_MODEL = process.env.NIGHTSCRIPT_TEXT_MODEL ?? 'gemini-3.6-flash';
+export const TEXT_MODEL = process.env.NIGHTSCRIPT_TEXT_MODEL ?? 'gemini-3.5-flash-lite';
 
 export class GeminiError extends Error {
   constructor(
