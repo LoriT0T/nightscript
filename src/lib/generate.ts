@@ -45,11 +45,19 @@ export interface GenerateResult {
 /** How many chunks to speak at once. Small enough to be a polite API citizen. */
 const CONCURRENCY = 3;
 
+/**
+ * Speak one chunk, retrying transient failures.
+ *
+ * 502s happen: the platform kills a function that runs long, and a chunk that streams back
+ * comfortably on its own can tip over the edge when three are in flight. One bad chunk must
+ * not lose an hour of work, so each is retried with backoff before giving up.
+ */
 async function speakChunk(
   section: string,
   text: string,
   voice: string,
   signal?: AbortSignal,
+  attempt = 0,
 ): Promise<Int16Array> {
   const res = await fetch('/api/tts', {
     method: 'POST',
@@ -58,6 +66,11 @@ async function speakChunk(
     signal,
   });
   if (!res.ok) {
+    const transient = res.status >= 500 || res.status === 429;
+    if (transient && attempt < 3) {
+      await new Promise((r) => setTimeout(r, 1500 * 2 ** attempt));
+      return speakChunk(section, text, voice, signal, attempt + 1);
+    }
     let message = `Speech request failed (${res.status})`;
     try {
       message = ((await res.json()) as { error?: string }).error ?? message;
@@ -84,7 +97,14 @@ async function speakChunk(
     bytes.set(p, o);
     o += p.length;
   }
-  if (total < 2) throw new Error('The voice model returned no audio for a chunk.');
+  if (total < 2) {
+    // An empty body from a stream that closed early is the same class of failure as a 502.
+    if (attempt < 3) {
+      await new Promise((r) => setTimeout(r, 1500 * 2 ** attempt));
+      return speakChunk(section, text, voice, signal, attempt + 1);
+    }
+    throw new Error('The voice model returned no audio for a chunk.');
+  }
 
   // Byte offset must be even and the buffer length a multiple of 2 for Int16Array.
   const usable = total - (total % 2);

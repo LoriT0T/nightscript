@@ -184,14 +184,21 @@ export interface Chunk {
 }
 
 /**
- * Chunk size is chosen for prosody stability, not for the token limit — we are two orders
- * of magnitude inside the context window either way. Longer chunks let the model
- * accelerate and brighten toward the end, which is the one thing the arc cannot tolerate.
+ * Chunk size is chosen for two reasons, neither of them the token limit — we are two orders
+ * of magnitude inside the context window either way.
+ *
+ * 1. Prosody. Longer chunks let the model accelerate and brighten toward the end, which is
+ *    the one thing the arc cannot tolerate.
+ * 2. The host's 30-second function ceiling. A 152-word chunk streams back in ~14 s when it
+ *    has the machine to itself, but three of those in flight at once is enough to push one
+ *    over the edge and 502 the whole generation. Halving the target buys the margin; the
+ *    extra requests are cheap and run in parallel anyway.
+ *
  * See docs/GEMINI-TTS.md §7.
  */
-export const CHUNK_TARGET_WORDS = 150;
-export const CHUNK_MAX_WORDS = 220;
-export const CHUNK_MAX_LINES = 14;
+export const CHUNK_TARGET_WORDS = 80;
+export const CHUNK_MAX_WORDS = 120;
+export const CHUNK_MAX_LINES = 8;
 
 export function planChunks(script: Script): Chunk[] {
   const chunks: Chunk[] = [];
