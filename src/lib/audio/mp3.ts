@@ -16,6 +16,35 @@
 const BITRATE_KBPS = 32;
 const SAMPLES_PER_FRAME = 1152;
 
+/**
+ * Hand the main thread back without using setTimeout.
+ *
+ * Browsers clamp timers to roughly one per second in a tab that is not focused. Encoding an
+ * hour yields a few hundred times, so a setTimeout-based loop that finishes in under a
+ * minute while you watch it takes ten minutes the moment you switch tabs — which is exactly
+ * what someone does while waiting for a long generation. Measured: an hour-long encode sat
+ * apparently frozen for over five minutes in a background tab.
+ *
+ * `scheduler.yield()` is the right tool where it exists; a MessageChannel round-trip is the
+ * fallback, and is a task rather than a timer, so it is not throttled the same way.
+ */
+const yieldToBrowser: () => Promise<void> = (() => {
+  const scheduler = (globalThis as { scheduler?: { yield?: () => Promise<void> } }).scheduler;
+  if (typeof scheduler?.yield === 'function') return () => scheduler.yield!();
+  if (typeof MessageChannel !== 'undefined') {
+    return () =>
+      new Promise<void>((resolve) => {
+        const channel = new MessageChannel();
+        channel.port1.onmessage = () => {
+          channel.port1.close();
+          resolve();
+        };
+        channel.port2.postMessage(undefined);
+      });
+  }
+  return () => new Promise<void>((resolve) => setTimeout(resolve, 0));
+})();
+
 export interface EncodeResult {
   blob: Blob;
   mime: string;
@@ -47,9 +76,9 @@ export async function encodeMp3(
     if (encoded.length > 0) chunks.push(new Uint8Array(encoded));
 
     // Hand the main thread back periodically so the progress UI keeps painting.
-    if (performance.now() - lastYield > 100) {
+    if (performance.now() - lastYield > 250) {
       onProgress?.(i / samples.length);
-      await new Promise((r) => setTimeout(r, 0));
+      await yieldToBrowser();
       lastYield = performance.now();
     }
   }

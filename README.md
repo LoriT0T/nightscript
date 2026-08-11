@@ -18,27 +18,35 @@ Two documents carry the reasoning and should be read before changing anything:
 
 ---
 
+## Live
+
+**<https://nightscript-app.netlify.app>** — hosted on Netlify. It asks for an access code
+before it will generate anything, because the deployment runs on a billed API key and a public
+URL without a gate is a machine that spends someone else's money on request.
+
+---
+
 ## Running it
 
 ```bash
 npm install
 ```
 
-ffmpeg is required and is not bundled:
+Put the key in `.env.local`, which is gitignored and never committed:
 
 ```bash
-brew install ffmpeg
-```
-
-Supply the API key as an environment variable in the shell that runs the server. It is never
-written into this repo, and `.env*` is gitignored:
-
-```bash
-export GEMINI_API_KEY='your-key-here'
+echo "GEMINI_API_KEY=your-key-here" > .env.local
 ```
 
 ```bash
 npm run dev
+```
+
+ffmpeg is only needed for the optional local CLI renderer below. The app itself does not use
+it — the browser assembles the audio.
+
+```bash
+brew install ffmpeg
 ```
 
 ### Generate the voice auditions once
@@ -102,12 +110,23 @@ intake  ─▶  script model  ─▶  validator  ─▶  you read and edit it
                                                     │
                                                     ▼
                               silence-split back into lines, re-laid against
-                              the pause schedule, de-essed, low-passed,
-                              tapered, mixed with the bed, normalised
+                              the pause schedule, filtered, tapered, mixed
+                              with the bed, normalised — all in the browser
                                                     │
                                                     ▼
-                              Opus/WebM + AAC/M4A  ─▶  your IndexedDB
+                                    MP3  ─▶  your IndexedDB
 ```
+
+**Why the browser does the audio.** The first version assembled with ffmpeg in a server
+process. That cannot be hosted: serverless platforms have no ffmpeg binary and no function
+budget that survives a multi-minute render. Moving assembly into the browser removed both
+problems and made the local-first claim literally true — the script and the finished hour never
+touch a disk we control. The server is two stateless streaming proxies that hold the API key.
+
+**Why streaming is not optional.** One 152-word chunk, measured 2026-08-11: non-streamed took
+46.9 s to first byte; streamed took 0.7 s to first byte and 13.6 s in total. Serverless hosts
+cap time-to-first-byte, so the non-streamed call cannot be proxied at all — and streaming is
+also 3.4x faster end to end.
 
 **The arc.** Six sections at fixed proportions: arrival (0:00), downshift (4:00), core
 (10:00), second pass (35:00), dissolution (50:00), fade (57:00). Pauses grow from 3 s in the

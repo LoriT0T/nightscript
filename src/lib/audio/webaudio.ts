@@ -125,132 +125,143 @@ export function findSpeechRegions(
 // ITU-R BS.1770 loudness
 // ---------------------------------------------------------------------------
 
-/** One biquad, direct form I. */
-function biquad(x: Float32Array, b: number[], a: number[]): Float32Array {
-  const y = new Float32Array(x.length);
-  let x1 = 0, x2 = 0, y1 = 0, y2 = 0;
-  for (let i = 0; i < x.length; i++) {
-    const v = b[0] * x[i] + b[1] * x1 + b[2] * x2 - a[1] * y1 - a[2] * y2;
-    x2 = x1; x1 = x[i]; y2 = y1; y1 = v;
-    y[i] = v;
-  }
-  return y;
+/**
+ * All four measurements in ONE allocation-free pass.
+ *
+ * The obvious implementation — K-weight into a new array, then walk overlapping 400 ms
+ * blocks, then walk again for true peak, then again per minute — allocates two more
+ * full-length buffers and reads the signal four times. At 60 minutes that is 86 million
+ * samples and roughly 700 MB of extra allocation on top of an already ~1 GB working set,
+ * which does not run slowly so much as thrash until the tab is unusable. Measured: it had
+ * not finished after six minutes.
+ *
+ * So: filter, accumulate and peak-detect sample by sample, keeping only 100 ms sub-block
+ * sums (36,000 numbers for an hour). Overlapping 400 ms blocks are then four consecutive
+ * sub-blocks, so the 75% overlap costs nothing instead of quadrupling the work.
+ */
+export interface SignalStats {
+  integratedLufs: number;
+  truePeakDb: number;
+  windowPeakDb: number[];
+  windowRmsDb: number[];
 }
 
-/**
- * K-weighting filter coefficients for an arbitrary sample rate, derived by bilinear
- * transform of the BS.1770 reference filters (which are specified at 48 kHz). We run at
- * 24 kHz, so the published coefficients cannot be used directly.
- */
-function kWeight(x: Float32Array, fs: number): Float32Array {
-  // Stage 1: high-frequency shelving boost, ~+4 dB above 1.5 kHz.
-  const db = 3.999843853973347;
+export function analyse(
+  x: Float32Array,
+  fs = ASSEMBLY_SAMPLE_RATE,
+  windowSec = 60,
+): SignalStats {
+  // --- K-weighting coefficients, bilinear-transformed for this sample rate ---
+  const shelfDb = 3.999843853973347;
   const f0 = 1681.974450955533;
   const Q = 0.7071752369554196;
   const K = Math.tan((Math.PI * f0) / fs);
-  const Vh = 10 ** (db / 20);
+  const Vh = 10 ** (shelfDb / 20);
   const Vb = Vh ** 0.4996667741545416;
   const a0 = 1 + K / Q + K * K;
-  const shelfB = [(Vh + (Vb * K) / Q + K * K) / a0, (2 * (K * K - Vh)) / a0, (Vh - (Vb * K) / Q + K * K) / a0];
-  const shelfA = [1, (2 * (K * K - 1)) / a0, (1 - K / Q + K * K) / a0];
+  const b0 = (Vh + (Vb * K) / Q + K * K) / a0;
+  const b1 = (2 * (K * K - Vh)) / a0;
+  const b2 = (Vh - (Vb * K) / Q + K * K) / a0;
+  const a1 = (2 * (K * K - 1)) / a0;
+  const a2 = (1 - K / Q + K * K) / a0;
 
-  // Stage 2: high-pass at ~38 Hz.
   const f0h = 38.13547087602444;
   const Qh = 0.5003270373238773;
   const Kh = Math.tan((Math.PI * f0h) / fs);
-  const hpB = [1, -2, 1];
-  const hpA = [
-    1,
-    (2 * (Kh * Kh - 1)) / (1 + Kh / Qh + Kh * Kh),
-    (1 - Kh / Qh + Kh * Kh) / (1 + Kh / Qh + Kh * Kh),
-  ];
+  const d0 = 1 + Kh / Qh + Kh * Kh;
+  const h1 = (2 * (Kh * Kh - 1)) / d0;
+  const h2 = (1 - Kh / Qh + Kh * Kh) / d0;
 
-  return biquad(biquad(x, shelfB, shelfA), hpB, hpA);
-}
+  let s1x1 = 0, s1x2 = 0, s1y1 = 0, s1y2 = 0;
+  let s2x1 = 0, s2x2 = 0, s2y1 = 0, s2y2 = 0;
 
-/**
- * Integrated loudness in LUFS, with BS.1770 absolute (-70 LUFS) and relative (-10 LU)
- * gating. Gating is not optional for this material: a track that is more than half silence
- * measures absurdly low without it.
- */
-export function integratedLufs(x: Float32Array, fs = ASSEMBLY_SAMPLE_RATE): number {
-  const weighted = kWeight(x, fs);
-  const blockSec = 0.4;
-  const stepSec = 0.1; // 75% overlap
-  const block = Math.round(blockSec * fs);
-  const step = Math.round(stepSec * fs);
-  if (weighted.length < block) return -Infinity;
+  const subSamples = Math.round(fs * 0.1);
+  const subSums: number[] = [];
+  let subSum = 0;
+  let subCount = 0;
 
-  const loudness: number[] = [];
-  for (let i = 0; i + block <= weighted.length; i += step) {
-    let sum = 0;
-    for (let j = i; j < i + block; j++) sum += weighted[j] * weighted[j];
-    const mean = sum / block;
-    loudness.push(mean > 0 ? -0.691 + 10 * Math.log10(mean) : -Infinity);
+  const winSamples = Math.round(fs * windowSec);
+  const windowPeakDb: number[] = [];
+  const windowRmsDb: number[] = [];
+  let winPeak = 0;
+  let winSquares = 0;
+  let winCount = 0;
+
+  let peak = 0;
+
+  for (let i = 0; i < x.length; i++) {
+    const v = x[i];
+
+    // True peak, 4x linearly interpolated against the next sample.
+    const av = v < 0 ? -v : v;
+    if (av > peak) peak = av;
+    if (i + 1 < x.length) {
+      const d = (x[i + 1] - v) / 4;
+      for (let k = 1; k < 4; k++) {
+        const iv = v + d * k;
+        const aiv = iv < 0 ? -iv : iv;
+        if (aiv > peak) peak = aiv;
+      }
+    }
+
+    // Per-window peak and RMS.
+    if (av > winPeak) winPeak = av;
+    winSquares += v * v;
+    if (++winCount === winSamples) {
+      windowPeakDb.push(winPeak === 0 ? -Infinity : 20 * Math.log10(winPeak));
+      windowRmsDb.push(
+        winSquares === 0 ? -Infinity : 20 * Math.log10(Math.sqrt(winSquares / winSamples)),
+      );
+      winPeak = 0;
+      winSquares = 0;
+      winCount = 0;
+    }
+
+    // K-weighting, two biquads in series, state carried by hand.
+    const y1v = b0 * v + b1 * s1x1 + b2 * s1x2 - a1 * s1y1 - a2 * s1y2;
+    s1x2 = s1x1; s1x1 = v; s1y2 = s1y1; s1y1 = y1v;
+    const y2v = y1v - 2 * s2x1 + s2x2 - h1 * s2y1 - h2 * s2y2;
+    s2x2 = s2x1; s2x1 = y1v; s2y2 = s2y1; s2y1 = y2v;
+
+    subSum += y2v * y2v;
+    if (++subCount === subSamples) {
+      subSums.push(subSum);
+      subSum = 0;
+      subCount = 0;
+    }
   }
 
-  const absGated = loudness.filter((l) => l > -70);
-  if (absGated.length === 0) return -Infinity;
+  if (winCount > 0) {
+    windowPeakDb.push(winPeak === 0 ? -Infinity : 20 * Math.log10(winPeak));
+    windowRmsDb.push(
+      winSquares === 0 ? -Infinity : 20 * Math.log10(Math.sqrt(winSquares / winCount)),
+    );
+  }
+
+  // --- gated integrated loudness over 400 ms blocks (4 sub-blocks), 100 ms hop ---
+  const blockLoudness: number[] = [];
+  for (let i = 0; i + 4 <= subSums.length; i++) {
+    const mean = (subSums[i] + subSums[i + 1] + subSums[i + 2] + subSums[i + 3]) / (subSamples * 4);
+    if (mean > 0) blockLoudness.push(-0.691 + 10 * Math.log10(mean));
+  }
 
   const meanPower = (ls: number[]) =>
     ls.reduce((a, l) => a + 10 ** ((l + 0.691) / 10), 0) / ls.length;
 
-  const relThreshold = -0.691 + 10 * Math.log10(meanPower(absGated)) - 10;
-  const gated = absGated.filter((l) => l > relThreshold);
-  if (gated.length === 0) return -Infinity;
-  return -0.691 + 10 * Math.log10(meanPower(gated));
-}
-
-/**
- * True peak in dBTP, approximated by 4x linear oversampling. Real true-peak metering uses a
- * polyphase filter; 4x interpolation is close enough to catch inter-sample peaks at the
- * accuracy this needs, and errs low by a fraction of a dB — which is why the target has
- * margin.
- */
-export function truePeakDb(x: Float32Array): number {
-  let peak = 0;
-  for (let i = 0; i < x.length - 1; i++) {
-    const a = x[i];
-    const b = x[i + 1];
-    peak = Math.max(peak, Math.abs(a));
-    for (let k = 1; k < 4; k++) peak = Math.max(peak, Math.abs(a + ((b - a) * k) / 4));
+  let integratedLufs = -Infinity;
+  const absGated = blockLoudness.filter((l) => l > -70);
+  if (absGated.length > 0) {
+    const relThreshold = -0.691 + 10 * Math.log10(meanPower(absGated)) - 10;
+    const gated = absGated.filter((l) => l > relThreshold);
+    if (gated.length > 0) integratedLufs = -0.691 + 10 * Math.log10(meanPower(gated));
   }
-  if (x.length) peak = Math.max(peak, Math.abs(x[x.length - 1]));
-  return peak === 0 ? -Infinity : 20 * Math.log10(peak);
-}
 
-/** Peak dBFS per window. The series the descent constraint is judged on. */
-export function windowPeakDb(
-  x: Float32Array,
-  windowSec = 60,
-  fs = ASSEMBLY_SAMPLE_RATE,
-): number[] {
-  const n = Math.round(windowSec * fs);
-  const out: number[] = [];
-  for (let i = 0; i < x.length; i += n) {
-    let peak = 0;
-    const end = Math.min(i + n, x.length);
-    for (let j = i; j < end; j++) peak = Math.max(peak, Math.abs(x[j]));
-    out.push(peak === 0 ? -Infinity : 20 * Math.log10(peak));
-  }
-  return out;
-}
-
-export function windowRmsDb(
-  x: Float32Array,
-  windowSec = 60,
-  fs = ASSEMBLY_SAMPLE_RATE,
-): number[] {
-  const n = Math.round(windowSec * fs);
-  const out: number[] = [];
-  for (let i = 0; i < x.length; i += n) {
-    const end = Math.min(i + n, x.length);
-    let sum = 0;
-    for (let j = i; j < end; j++) sum += x[j] * x[j];
-    const r = Math.sqrt(sum / Math.max(1, end - i));
-    out.push(r === 0 ? -Infinity : 20 * Math.log10(r));
-  }
-  return out;
+  return {
+    integratedLufs,
+    truePeakDb: peak === 0 ? -Infinity : 20 * Math.log10(peak),
+    windowPeakDb,
+    windowRmsDb,
+  };
 }
 
 export function isMonotonicAfter(series: number[], fromMinute = 4, toleranceDb = 0.5): boolean {
@@ -479,20 +490,19 @@ export async function assembleInBrowser(args: AssembleArgs): Promise<AssembledTr
 
   // ---- 5. normalise to -23 LUFS with true peak under -3 dBTP -------------------------
   say('Measuring loudness…');
-  const measuredLufs = integratedLufs(out, fs);
-  const measuredPeak = truePeakDb(out);
-  let gainDb = Number.isFinite(measuredLufs) ? -23 - measuredLufs : 0;
-  // Never let the gain push true peak past the ceiling; loudness yields to peak. The
-  // ceiling is -3.5 rather than -3.0 so the result is strictly *under* -3 dBTP, and because
-  // the 4x-oversampled peak estimate errs a fraction of a dB low.
-  if (measuredPeak + gainDb > PEAK_CEILING_DB) gainDb = PEAK_CEILING_DB - measuredPeak;
+  const stats = analyse(out, fs, 60);
+  let gainDb = Number.isFinite(stats.integratedLufs) ? -23 - stats.integratedLufs : 0;
+  // Never let the gain push true peak past the ceiling; loudness yields to peak.
+  if (stats.truePeakDb + gainDb > PEAK_CEILING_DB) gainDb = PEAK_CEILING_DB - stats.truePeakDb;
   const gain = 10 ** (gainDb / 20);
   for (let i = 0; i < out.length; i++) out[i] *= gain;
 
-  const finalLufs = integratedLufs(out, fs);
-  const finalPeak = truePeakDb(out);
-  const minutePeakDb = windowPeakDb(out, 60, fs);
-  const minuteRmsDb = windowRmsDb(out, 60, fs);
+  // A pure gain shifts loudness and peak by exactly that many dB, so re-measuring an hour
+  // to learn what arithmetic already tells us would double the cost for nothing.
+  const finalLufs = stats.integratedLufs + gainDb;
+  const finalPeak = stats.truePeakDb + gainDb;
+  const minutePeakDb = stats.windowPeakDb.map((v) => v + gainDb);
+  const minuteRmsDb = stats.windowRmsDb.map((v) => v + gainDb);
 
   const finiteChunk = chunkRmsDb.filter(Number.isFinite);
   const mean = finiteChunk.reduce((a, b) => a + b, 0) / Math.max(1, finiteChunk.length);
