@@ -368,8 +368,32 @@ export async function assembleInBrowser(args: AssembleArgs): Promise<AssembledTr
   // ---- 2. re-time against measured speech -----------------------------------------
   // The plan sized pauses against an estimated speaking rate; now the audio exists and we
   // know the real one. Each section's pauses get one scale factor so the section lands on
-  // its time budget. Without this the hour drifts by however much the model's pace differed.
+  // its time budget.
+  //
+  // The subtlety that cost a track: a pause is only placed after a segment that actually
+  // exists. When the model runs two lines together, a ten-line chunk comes back as, say,
+  // seven speech regions, so only seven pauses are placed — not ten. Scaling against the
+  // *planned* ten-pause list then leaves the section far short of its budget. Measured: a
+  // 60-minute track came out at 30:09. So the effective pause list is computed FIRST, per
+  // play, and the scale is derived from that.
   say('Re-timing against measured speech…');
+
+  const effective = new Map<Play, number[]>();
+  for (const play of plays) {
+    const s = split.get(play.chunk.hashKey);
+    if (!s || s.segments.length === 0) continue;
+    const matched = s.segments.length === play.chunk.lines.length;
+    if (matched) {
+      effective.set(play, play.pauses.slice(0, s.segments.length));
+    } else {
+      // Spread the chunk's whole planned silence budget across the segments we really have,
+      // so a mis-split loses the line boundary but never loses the time.
+      const totalPlanned = play.pauses.reduce((a, b) => a + b, 0);
+      const per = totalPlanned / s.segments.length;
+      effective.set(play, new Array(s.segments.length).fill(per));
+    }
+  }
+
   const scaleBySection = new Map<Section, number>();
   for (const spec of SECTION_SPEC.values()) {
     if (spec.section === 'fade') continue;
@@ -379,12 +403,12 @@ export async function assembleInBrowser(args: AssembleArgs): Promise<AssembledTr
     let pause = 0;
     for (const p of sectionPlays) {
       speech += split.get(p.chunk.hashKey)?.durations.reduce((a, b) => a + b, 0) ?? 0;
-      pause += p.pauses.reduce((a, b) => a + b, 0);
+      pause += (effective.get(p) ?? []).reduce((a, b) => a + b, 0);
     }
     const budget = spec.share * settings.minutes * 60;
     scaleBySection.set(
       spec.section,
-      pause > 0 ? Math.min(2.5, Math.max(0.4, (budget - speech) / pause)) : 1,
+      pause > 0 ? Math.min(4, Math.max(0.4, (budget - speech) / pause)) : 1,
     );
   }
 
@@ -395,17 +419,14 @@ export async function assembleInBrowser(args: AssembleArgs): Promise<AssembledTr
 
   for (const play of plays) {
     const s = split.get(play.chunk.hashKey);
-    if (!s || s.segments.length === 0) continue;
+    const pauses = effective.get(play);
+    if (!s || !pauses) continue;
     const scale = scaleBySection.get(play.chunk.section) ?? 1;
-    const matched = s.segments.length === play.chunk.lines.length;
 
     s.segments.forEach((seg, i) => {
       pieces.push({ data: seg, samples: seg.length });
       totalSamples += seg.length;
-      const nominal = matched
-        ? (play.pauses[i] ?? play.pauses[play.pauses.length - 1] ?? 4)
-        : play.pauses.reduce((a, b) => a + b, 0) / Math.max(1, play.pauses.length);
-      const gap = Math.round(nominal * scale * fs);
+      const gap = Math.round((pauses[i] ?? pauses[pauses.length - 1] ?? 4) * scale * fs);
       pieces.push({ data: null, samples: gap });
       totalSamples += gap;
     });
