@@ -26,10 +26,12 @@ export async function POST(req: Request) {
     return Response.json({ error: 'Server is missing GEMINI_API_KEY.' }, { status: 503 });
   }
 
-  const { intake, minutes, section } = (await req.json()) as {
+  const { intake, minutes, section, lineCount, variantNote } = (await req.json()) as {
     intake: Intake;
     minutes?: number;
     section: Section;
+    lineCount?: number;
+    variantNote?: string;
   };
   if (!intake?.goals?.length) {
     return Response.json({ error: 'No goals provided.' }, { status: 400 });
@@ -39,7 +41,7 @@ export async function POST(req: Request) {
   }
 
   try {
-    const result = await generateSection(intake, minutes ?? 60, section);
+    const result = await generateSection(intake, minutes ?? 60, section, lineCount, variantNote);
     return Response.json(result);
   } catch (e) {
     return Response.json({ error: (e as Error).message }, { status: 500 });

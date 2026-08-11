@@ -58,12 +58,12 @@ line. Short: five to nine words. Patterns: sensory, compassion, ambivalence.`,
 hands, chest, belly, legs, feet. Sensory pattern throughout, goalId null. Five to nine words
 each. Name one body part per line and let it soften. Do not repeat a body part.`,
 
-  core: (_n, uniqueCore) => `Write ${uniqueCore} CORE lines — the densest section, covering the
+  core: (n) => `Write ${n} CORE lines — the densest section, covering the
 goals in proportion to their share. Mix all seven patterns, weighted so that roughly a third are
 implementation intentions ("When <specific cue>, I <specific action>") drawn from their stated
 obstacles. Every line carries the goalId it serves. Ten to sixteen words.`,
 
-  second: (_n, uniqueCore) => `Write ${Math.max(12, Math.round(uniqueCore * 0.45))} SECOND-PASS
+  second: (n) => `Write ${n} SECOND-PASS
 lines: a re-voicing of the same ideas as the core section, but softer, shorter and weighted much
 more heavily to self-compassion and permitted ambivalence. Not verbatim repeats — the gentler
 version of the same thoughts. Seven to eleven words. Carry the goalId.`,
@@ -72,10 +72,28 @@ version of the same thoughts. Seven to eleven words. Carry the goalId.`,
 "Softer now." "Still here." "Nothing to fix tonight." Sparse and trailing. goalId null.`,
 };
 
-export function buildSectionPrompt(intake: Intake, minutes: number, section: Section): string {
+/**
+ * Default line count a section asks for, before any splitting.
+ */
+export function sectionLineTarget(minutes: number, section: Section): number {
+  const counts = targetLineCounts(minutes);
+  const uniqueCore = Math.max(40, Math.min(60, Math.round(counts.core / 3.5)));
+  if (section === 'core') return uniqueCore;
+  if (section === 'second') return Math.max(12, Math.round(uniqueCore * 0.45));
+  return counts[section] ?? 20;
+}
+
+export function buildSectionPrompt(
+  intake: Intake,
+  minutes: number,
+  section: Section,
+  lineCount?: number,
+  variantNote?: string,
+): string {
   const counts = targetLineCounts(minutes);
   const uniqueCore = Math.max(40, Math.min(60, Math.round(counts.core / 3.5)));
   const brief = SECTION_BRIEF[section as Exclude<Section, 'fade'>];
+  const wanted = lineCount ?? sectionLineTarget(minutes, section);
 
   return `You are writing one section of a ${minutes}-minute affirmation track that one person
 will play as they fall asleep. It is read aloud by a single calm female voice. Write only what
@@ -116,7 +134,9 @@ No stage directions, no bracketed tags, no numbering inside the text.
 
 ═══ YOUR TASK ═══
 
-${brief(counts[section] ?? 20, uniqueCore)}
+${brief(wanted, uniqueCore)}
+
+Write exactly ${wanted} lines.${variantNote ? ` ${variantNote}` : ''}
 
 Return ONLY a JSON object, no prose, no markdown fences:
 
@@ -196,8 +216,13 @@ export async function generateSection(
   intake: Intake,
   minutes: number,
   section: Section,
+  lineCount?: number,
+  variantNote?: string,
 ): Promise<GenerateSectionResult> {
-  let lines = parseScriptJson(await generateOnce(buildSectionPrompt(intake, minutes, section)), intake.goals);
+  let lines = parseScriptJson(
+    await generateOnce(buildSectionPrompt(intake, minutes, section, lineCount, variantNote)),
+    intake.goals,
+  );
   // The model occasionally labels a line with the wrong section; this call only asked for one.
   lines = lines.map((l) => ({ ...l, section }));
 

@@ -152,7 +152,36 @@ export async function generateTrack(
  * a single whole-script call exceeds the host's function limit (see the route). The sections
  * come back in whatever order they finish and are reassembled into arc order here.
  */
-const SCRIPT_SECTIONS: Section[] = ['arrival', 'downshift', 'core', 'second', 'dissolution'];
+/**
+ * The request plan. `core` is split in two because a single 40-line core call exceeds the
+ * host's function limit — verified in production, where it returned 502 while the four
+ * smaller sections all succeeded. The two halves get different emphasis notes so they do
+ * not converge on the same lines.
+ */
+const SCRIPT_REQUESTS: Array<{
+  section: Section;
+  lineCount?: number;
+  variantNote?: string;
+}> = [
+  { section: 'arrival' },
+  { section: 'downshift' },
+  {
+    section: 'core',
+    lineCount: 22,
+    variantNote:
+      'Weight this half towards implementation intentions and evidence anchored in their own past.',
+  },
+  {
+    section: 'core',
+    lineCount: 22,
+    variantNote:
+      'Weight this half towards values, process framing and permitted ambivalence. Do not repeat ideas already covered by intentions about their stated obstacle.',
+  },
+  { section: 'second' },
+  { section: 'dissolution' },
+];
+
+const SECTION_ORDER: Section[] = ['arrival', 'downshift', 'core', 'second', 'dissolution'];
 
 export async function writeScript(
   intake: Intake,
@@ -163,11 +192,11 @@ export async function writeScript(
   onProgress('Writing the script…');
 
   const results = await Promise.all(
-    SCRIPT_SECTIONS.map(async (section) => {
+    SCRIPT_REQUESTS.map(async (request) => {
       const res = await fetch('/api/script', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...authHeaders() },
-        body: JSON.stringify({ intake, minutes, section }),
+        body: JSON.stringify({ intake, minutes, ...request }),
       });
       if (!res.ok) {
         let message = `Script request failed (${res.status})`;
@@ -176,18 +205,19 @@ export async function writeScript(
         } catch {
           /* keep generic */
         }
-        throw new Error(message);
+        throw new Error(`${request.section}: ${message}`);
       }
       const json = (await res.json()) as { lines: Line[] };
       done++;
-      onProgress(`Writing the script — ${done} of ${SCRIPT_SECTIONS.length} sections`);
-      return { section, lines: json.lines ?? [] };
+      onProgress(`Writing the script — ${done} of ${SCRIPT_REQUESTS.length} parts`);
+      return { section: request.section, lines: json.lines ?? [] };
     }),
   );
 
   // Reassemble in arc order, not completion order.
-  const bySection = new Map(results.map((r) => [r.section, r.lines]));
-  const lines = SCRIPT_SECTIONS.flatMap((s) => bySection.get(s) ?? []);
+  const lines = SECTION_ORDER.flatMap((s) =>
+    results.filter((r) => r.section === s).flatMap((r) => r.lines),
+  );
   if (lines.length === 0) throw new Error('The writer returned nothing usable.');
   return { lines, cycles: 1 };
 }
