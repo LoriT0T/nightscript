@@ -43,7 +43,9 @@ next-env.d.ts
 # generated audio, caches, and anything produced by a run
 /.cache
 /out
-/public/auditions
+# Voice auditions: ship the small AAC previews so the picker works on a fresh clone,
+# but never the raw WAVs they were made from.
+/public/auditions/*.wav
 
 # Local Netlify folder
 .netlify
