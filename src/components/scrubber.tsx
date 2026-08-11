@@ -38,6 +38,19 @@ export function sectionsFor(durationSec: number): Section[] {
   return out;
 }
 
+/**
+ * Where a loop should restart.
+ *
+ * Not zero. The opening two sections are a breath cue and a body scan whose whole job is to
+ * get you from awake to nearly-asleep; hearing them again at 2am would be starting the
+ * settling-down process over on someone who is already settled. The affirmations are the part
+ * worth repeating, so a loop rejoins at the core section.
+ */
+export function loopStartSec(durationSec: number): number {
+  const core = sectionsFor(durationSec).find((s) => s.label === 'Core affirmations');
+  return core ? core.startSec : 0;
+}
+
 export function Scrubber({
   position,
   duration,

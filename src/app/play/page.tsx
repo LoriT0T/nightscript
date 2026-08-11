@@ -5,7 +5,7 @@ import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { getAudio, getTrack } from '@/lib/db';
 import { exampleUrl, findExample } from '@/lib/examples';
-import { Scrubber } from '@/components/scrubber';
+import { Scrubber, loopStartSec } from '@/components/scrubber';
 import type { TrackMeta } from '@/lib/types';
 
 /**
@@ -73,6 +73,10 @@ function Player() {
   const [timerMin, setTimerMin] = useState<number>(0);
   const [dim, setDim] = useState(false);
   const [unsupported, setUnsupported] = useState(false);
+  const [loop, setLoop] = useState(() => {
+    if (typeof localStorage === 'undefined') return false;
+    return localStorage.getItem('nightscript.loop') === '1';
+  });
   const idleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -223,6 +227,13 @@ function Player() {
         onPause={() => setPlaying(false)}
         onTimeUpdate={(e) => setPosition(e.currentTarget.currentTime)}
         onLoadedMetadata={(e) => setDuration(e.currentTarget.duration)}
+        onEnded={(e) => {
+          if (!loop) return;
+          // Rejoin at the affirmations rather than at zero — see loopStartSec.
+          const el = e.currentTarget;
+          el.currentTime = loopStartSec(el.duration || duration);
+          void el.play();
+        }}
         onError={() => setUnsupported(true)}
       />
 
@@ -302,6 +313,19 @@ function Player() {
           </div>
 
           <div className="flex flex-wrap items-center justify-center gap-2">
+            <button
+              onClick={() => {
+                const next = !loop;
+                setLoop(next);
+                localStorage.setItem('nightscript.loop', next ? '1' : '0');
+              }}
+              aria-pressed={loop}
+              className={`min-h-11 rounded-lg border px-4 text-sm ${
+                loop ? 'border-ink-500 bg-ink-800 text-ink-200' : 'border-ink-800 text-ink-500'
+              }`}
+            >
+              {loop ? 'repeating' : 'repeat'}
+            </button>
             {TIMERS.map((t) => (
               <button
                 key={t}
@@ -329,6 +353,7 @@ function Player() {
         <footer className="px-6 pb-8 text-center">
           <p className="text-xs text-ink-600">
             The screen goes dark on its own. Playing continues when it locks.
+            {loop ? ' Repeat rejoins at the affirmations, not the breathing.' : ''}
           </p>
         </footer>
       </div>

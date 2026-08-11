@@ -190,10 +190,15 @@ The tick marks are the useful part. Every track has the same known shape, so the
 straight to the core affirmations instead of hunting for where the body scan ends. The label
 under the bar names the section you are in.
 
+**Repeat** loops the track, and it rejoins at the **affirmations** rather than at zero. The
+opening two sections are a breath cue and a body scan whose whole job is to get you from awake
+to nearly asleep; playing those again at 2am would restart the settling-down process on someone
+who is already settled. Only the part worth repeating repeats.
+
 Also: ±1 minute buttons, arrow keys (Shift for five minutes), lock-screen scrubbing via the
-Media Session API, volume remembered between nights, and **save** on any track in the library
-to write the audio out as a file — storage is per-browser, so that is how a track gets from a
-laptop to a phone.
+Media Session API, volume and repeat remembered between nights, and **save** on any track in
+the library to write the audio out as a file — storage is per-browser, so that is how a track
+gets from a laptop to a phone.
 
 ## What this does not have
 
