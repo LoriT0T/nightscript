@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { Button, Field, Note, Shell, Slider, TextArea } from '@/components/ui';
 import { newId, saveDraft } from '@/lib/db';
 import { AUDITION_VOICES, DEFAULT_VOICE } from '@/lib/voices';
+import { getAccessCode, setAccessCode } from '@/lib/access';
 import type { Goal, Intake, TrackSettings } from '@/lib/types';
 
 /**
@@ -99,6 +100,8 @@ export default function NewTrackPage() {
 
       {step === 1 && <VoiceStep settings={settings} onChange={setSettings} />}
 
+      {step === 2 && <AccessStep />}
+
       {step === 2 && (
         <div className="space-y-6">
           <div className="space-y-2 text-sm leading-relaxed text-ink-300">
@@ -113,8 +116,9 @@ export default function NewTrackPage() {
             </p>
           </div>
           <Note>
-            Writing the script takes about a minute. Generating the audio afterwards takes
-            roughly ten, most of it spent waiting out the API rate limit.
+            Writing the script takes about a minute. Making the audio afterwards takes a few
+            more — the voice is generated a passage at a time, then the hour is assembled and
+            encoded here in your browser. Keep the tab open while it runs.
           </Note>
           <Button variant="primary" onClick={start} disabled={saving}>
             {saving ? 'Starting…' : 'Write the script'}
@@ -255,6 +259,43 @@ function GoalForm({
         </span>
       </label>
     </section>
+  );
+}
+
+/**
+ * The hosted copy runs on a billed API key, so it asks for a shared code before it will
+ * spend anything. Local copies leave NIGHTSCRIPT_ACCESS_CODE unset and never see this.
+ */
+function AccessStep() {
+  const [code, setCode] = useState('');
+  const [saved, setSaved] = useState(false);
+
+  useEffect(() => {
+    setCode(getAccessCode());
+  }, []);
+
+  return (
+    <div className="mb-8">
+      <Field
+        label="Access code"
+        hint="This copy is hosted on a paid key, so it asks for a code before generating. Stored in this browser only; you enter it once."
+      >
+        <input
+          type="password"
+          value={code}
+          onChange={(e) => {
+            setCode(e.target.value);
+            setSaved(false);
+          }}
+          onBlur={() => {
+            setAccessCode(code);
+            setSaved(true);
+          }}
+          className="w-full rounded-lg border border-ink-700 bg-ink-900 px-3 py-2 text-sm text-ink-100 focus:border-ink-500 focus:outline-none"
+        />
+      </Field>
+      {saved && <p className="mt-2 text-xs text-ink-500">Saved on this device.</p>}
+    </div>
   );
 }
 

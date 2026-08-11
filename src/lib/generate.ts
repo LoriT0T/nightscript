@@ -1,5 +1,6 @@
 'use client';
 
+import { authHeaders } from '@/lib/access';
 import { buildTimeline, planChunks, timelineDurationSec } from '@/lib/script/plan';
 import { assembleInBrowser, type ChunkPcm } from '@/lib/audio/webaudio';
 import { encodeMp3 } from '@/lib/audio/mp3';
@@ -43,7 +44,7 @@ async function speakChunk(
 ): Promise<Int16Array> {
   const res = await fetch('/api/tts', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
     body: JSON.stringify({ section, text, voice }),
     signal,
   });
@@ -152,7 +153,7 @@ export async function writeScript(
 ): Promise<Script> {
   const res = await fetch('/api/script', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
     body: JSON.stringify({ intake, minutes }),
   });
   if (!res.ok) {

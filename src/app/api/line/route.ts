@@ -1,3 +1,4 @@
+import { checkAccess } from '@/lib/access';
 import { callInteractions, TEXT_MODEL, withRetry } from '@/lib/gemini/client';
 import { parseScriptJson } from '@/lib/gemini/script';
 import { validateLine } from '@/lib/affirmations/validator';
@@ -7,6 +8,8 @@ export const runtime = 'nodejs';
 
 /** Regenerate one line in place, keeping its section and pattern. */
 export async function POST(req: Request) {
+  const denied = checkAccess(req);
+  if (denied) return denied;
   try {
     const { line, goal, instruction } = (await req.json()) as {
       line: Line;

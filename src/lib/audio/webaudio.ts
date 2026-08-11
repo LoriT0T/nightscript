@@ -31,6 +31,10 @@ const BED_DEFAULT_DB = -34;
 const FADE_SEC = 90;
 const TAPER_START_SEC = 240;
 const TAPER_DEPTH_DB = 6;
+/** True-peak ceiling. Below the -3 dBTP requirement, not at it. */
+const PEAK_CEILING_DB = -3.5;
+/** Bed is generated once and looped. A full-length bed for an hour is 345 MB by itself. */
+const BED_LOOP_SEC = 30;
 
 /** Silence detection, matching the ffmpeg splitter's thresholds. */
 const SILENCE_DB = -40;
@@ -414,6 +418,8 @@ export async function assembleInBrowser(args: AssembleArgs): Promise<AssembledTr
 
   const voiceBuffer = ctx.createBuffer(1, totalSamples, fs);
   voiceBuffer.getChannelData(0).set(voice);
+  // The context owns the samples now; let the staging copy go before we allocate more.
+  pieces.length = 0;
   const voiceSrc = ctx.createBufferSource();
   voiceSrc.buffer = voiceBuffer;
 
@@ -436,10 +442,12 @@ export async function assembleInBrowser(args: AssembleArgs): Promise<AssembledTr
 
   const bedGain = ctx.createGain();
   if (settings.bed !== 'none') {
-    const bedBuffer = ctx.createBuffer(1, totalSamples, fs);
-    bedBuffer.getChannelData(0).set(makeBed(settings.bed, totalSamples));
+    const bedLoopSamples = Math.min(totalSamples, Math.round(BED_LOOP_SEC * fs));
+    const bedBuffer = ctx.createBuffer(1, bedLoopSamples, fs);
+    bedBuffer.getChannelData(0).set(makeBed(settings.bed, bedLoopSamples));
     const bedSrc = ctx.createBufferSource();
     bedSrc.buffer = bedBuffer;
+    bedSrc.loop = true;
     bedGain.gain.value = 10 ** ((settings.bedLevelDb ?? BED_DEFAULT_DB) / 20);
     bedSrc.connect(bedGain).connect(master);
     bedSrc.start(0);
@@ -466,15 +474,18 @@ export async function assembleInBrowser(args: AssembleArgs): Promise<AssembledTr
   voiceSrc.start(0);
 
   const rendered = await ctx.startRendering();
-  const out = Float32Array.from(rendered.getChannelData(0));
+  // Deliberately not copied. An hour is 86 million samples; a needless copy is 345 MB.
+  const out = rendered.getChannelData(0);
 
   // ---- 5. normalise to -23 LUFS with true peak under -3 dBTP -------------------------
   say('Measuring loudness…');
   const measuredLufs = integratedLufs(out, fs);
   const measuredPeak = truePeakDb(out);
   let gainDb = Number.isFinite(measuredLufs) ? -23 - measuredLufs : 0;
-  // Never let the gain push true peak past the ceiling; loudness yields to peak.
-  if (measuredPeak + gainDb > -3) gainDb = -3 - measuredPeak;
+  // Never let the gain push true peak past the ceiling; loudness yields to peak. The
+  // ceiling is -3.5 rather than -3.0 so the result is strictly *under* -3 dBTP, and because
+  // the 4x-oversampled peak estimate errs a fraction of a dB low.
+  if (measuredPeak + gainDb > PEAK_CEILING_DB) gainDb = PEAK_CEILING_DB - measuredPeak;
   const gain = 10 ** (gainDb / 20);
   for (let i = 0; i < out.length; i++) out[i] *= gain;
 

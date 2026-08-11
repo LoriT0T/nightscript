@@ -1,3 +1,4 @@
+import { checkAccess } from '@/lib/access';
 import { generateScript } from '@/lib/gemini/script';
 import { validateScript } from '@/lib/affirmations/validator';
 import type { Intake } from '@/lib/types';
@@ -17,6 +18,9 @@ export const dynamic = 'force-dynamic';
  * Stateless: the intake is used to build one prompt and is not written anywhere.
  */
 export async function POST(req: Request) {
+  const denied = checkAccess(req);
+  if (denied) return denied;
+
   if (!process.env.GEMINI_API_KEY) {
     return Response.json({ error: 'Server is missing GEMINI_API_KEY.' }, { status: 503 });
   }

@@ -3,6 +3,7 @@
 import { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Button, Note, Shell } from '@/components/ui';
+import { authHeaders } from '@/lib/access';
 import { getDraft, saveDraft, saveTrack, newId, type Draft } from '@/lib/db';
 import { generateTrack, writeScript as writeScriptApi, type GenerateProgress } from '@/lib/generate';
 import { validateScript } from '@/lib/affirmations/validator';
@@ -200,7 +201,7 @@ function Review() {
                       onRegenerate={async () => {
                         const res = await fetch('/api/line', {
                           method: 'POST',
-                          headers: { 'Content-Type': 'application/json' },
+                          headers: { 'Content-Type': 'application/json', ...authHeaders() },
                           body: JSON.stringify({
                             line,
                             goal: draft.intake.goals.find((g) => g.id === line.goalId),

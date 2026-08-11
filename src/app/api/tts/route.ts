@@ -1,3 +1,4 @@
+import { checkAccess } from '@/lib/access';
 import { API_REVISION, ENDPOINT, TTS_MODEL } from '@/lib/gemini/client';
 import { extractAudioBase64, parseSse } from '@/lib/gemini/stream';
 import { buildInput } from '@/lib/gemini/style';
@@ -17,6 +18,9 @@ export const dynamic = 'force-dynamic';
  * Streaming is required, not preferred. See docs/GEMINI-TTS.md §6 and src/lib/gemini/stream.ts.
  */
 export async function POST(req: Request) {
+  const denied = checkAccess(req);
+  if (denied) return denied;
+
   const key = process.env.GEMINI_API_KEY;
   if (!key) {
     return Response.json({ error: 'Server is missing GEMINI_API_KEY.' }, { status: 503 });
