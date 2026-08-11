@@ -529,17 +529,53 @@ export async function assembleInBrowser(args: AssembleArgs): Promise<AssembledTr
   // Deliberately not copied. An hour is 86 million samples; a needless copy is 345 MB.
   const out = rendered.getChannelData(0);
 
-  // ---- 5. normalise to -23 LUFS with true peak under -3 dBTP -------------------------
+  // ---- 5. enforce the descent, then normalise ---------------------------------------
+  // "Nothing gets louder after minute four" is the brief's hardest constraint, and the one
+  // thing that cannot be left to chance: the core section is the densest part of the track,
+  // so its peaks naturally sit above the quiet opening even with a taper running. Measured
+  // on a real hour: 17 minutes exceeded the minute before them.
+  //
+  // So it is enforced rather than hoped for. Measure the per-minute peak, cap every minute
+  // after the fourth at the loudest of the opening minutes, and apply the correction as a
+  // gain that moves smoothly across each minute — a slow few-dB change no one can hear as an
+  // event, which is exactly what the fade research says about slow level changes.
   say('Measuring loudness…');
-  const stats = analyse(out, fs, 60);
+  let stats = analyse(out, fs, 60);
+
+  const CAP_FROM_MINUTE = 4;
+  const peaks = stats.windowPeakDb;
+  const opening = peaks.slice(0, CAP_FROM_MINUTE + 1).filter(Number.isFinite);
+  if (opening.length > 0 && peaks.length > CAP_FROM_MINUTE + 1) {
+    const ceiling = Math.max(...opening);
+    const minuteGainDb = peaks.map((p, i) =>
+      i <= CAP_FROM_MINUTE || !Number.isFinite(p) ? 0 : Math.min(0, ceiling - p),
+    );
+
+    if (minuteGainDb.some((g) => g < -0.01)) {
+      say('Holding the level down…');
+      const win = Math.round(60 * fs);
+      for (let i = 0; i < out.length; i++) {
+        // Interpolate between the gain at this minute's centre and the next one's, so the
+        // correction never steps.
+        const pos = i / win - 0.5;
+        const lo = Math.max(0, Math.min(minuteGainDb.length - 1, Math.floor(pos)));
+        const hi = Math.max(0, Math.min(minuteGainDb.length - 1, lo + 1));
+        const frac = Math.max(0, Math.min(1, pos - lo));
+        const db = minuteGainDb[lo] * (1 - frac) + minuteGainDb[hi] * frac;
+        if (db < 0) out[i] *= 10 ** (db / 20);
+      }
+      stats = analyse(out, fs, 60);
+    }
+  }
+
+  // Normalise to -23 LUFS, with true peak yielding nothing to loudness.
   let gainDb = Number.isFinite(stats.integratedLufs) ? -23 - stats.integratedLufs : 0;
-  // Never let the gain push true peak past the ceiling; loudness yields to peak.
   if (stats.truePeakDb + gainDb > PEAK_CEILING_DB) gainDb = PEAK_CEILING_DB - stats.truePeakDb;
   const gain = 10 ** (gainDb / 20);
   for (let i = 0; i < out.length; i++) out[i] *= gain;
 
   // A pure gain shifts loudness and peak by exactly that many dB, so re-measuring an hour
-  // to learn what arithmetic already tells us would double the cost for nothing.
+  // to learn what arithmetic already tells us would cost a full pass for nothing.
   const finalLufs = stats.integratedLufs + gainDb;
   const finalPeak = stats.truePeakDb + gainDb;
   const minutePeakDb = stats.windowPeakDb.map((v) => v + gainDb);
