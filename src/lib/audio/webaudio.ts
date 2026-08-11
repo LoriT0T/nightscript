@@ -30,7 +30,7 @@ export const ASSEMBLY_SAMPLE_RATE = SAMPLE_RATE;
 const BED_DEFAULT_DB = -34;
 const FADE_SEC = 90;
 const TAPER_START_SEC = 240;
-const TAPER_DEPTH_DB = 6;
+const TAPER_DEPTH_DB = 8;
 /** True-peak ceiling. Below the -3 dBTP requirement, not at it. */
 const PEAK_CEILING_DB = -3.5;
 /** Bed is generated once and looped. A full-length bed for an hour is 345 MB by itself. */
@@ -265,11 +265,12 @@ export function analyse(
 }
 
 export function isMonotonicAfter(series: number[], fromMinute = 4, toleranceDb = 0.5): boolean {
-  for (let i = fromMinute + 1; i < series.length; i++) {
-    const prev = series[i - 1];
+  let runningMax = -Infinity;
+  for (let i = fromMinute; i < series.length; i++) {
     const cur = series[i];
-    if (!Number.isFinite(prev) || !Number.isFinite(cur)) continue;
-    if (cur > prev + toleranceDb) return false;
+    if (!Number.isFinite(cur)) continue;
+    if (runningMax !== -Infinity && cur > runningMax + toleranceDb) return false;
+    runningMax = Math.max(runningMax, cur);
   }
   return true;
 }
@@ -469,8 +470,27 @@ export async function assembleInBrowser(args: AssembleArgs): Promise<AssembledTr
   lp.type = 'lowpass';
   lp.frequency.value = 10000;
 
+  /**
+   * Gentle peak control. Not for loudness-war reasons — for two specific measured failures.
+   *
+   * Without it, a real 60-minute track came out at -25.79 LUFS instead of -23 (a handful of
+   * loud consonants capped the normalisation gain), and its per-minute peak curve wobbled by
+   * ±3 dB, which swamps the -6 dB taper and breaks the "nothing gets louder" constraint
+   * outright. Taming peaks fixes both at once: the average can come up to target, and the
+   * descent becomes the dominant thing in the envelope rather than a rounding error.
+   *
+   * Settings are deliberately mild — a high ratio above a low threshold with a slow release,
+   * so it catches the occasional spike and is otherwise not doing anything.
+   */
+  const limiter = ctx.createDynamicsCompressor();
+  limiter.threshold.value = -20;
+  limiter.knee.value = 8;
+  limiter.ratio.value = 12;
+  limiter.attack.value = 0.004;
+  limiter.release.value = 0.25;
+
   const master = ctx.createGain();
-  voiceSrc.connect(hp).connect(deEss).connect(lp).connect(master);
+  voiceSrc.connect(hp).connect(deEss).connect(lp).connect(limiter).connect(master);
 
   const bedGain = ctx.createGain();
   if (settings.bed !== 'none') {
