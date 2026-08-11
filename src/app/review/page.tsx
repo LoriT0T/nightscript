@@ -4,7 +4,7 @@ import { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Button, Note, Shell } from '@/components/ui';
 import { authHeaders } from '@/lib/access';
-import { getDraft, saveDraft, saveTrack, newId, type Draft } from '@/lib/db';
+import { getDraft, openDatabase, saveDraft, saveTrack, newId, type Draft } from '@/lib/db';
 import { generateTrack, writeScript as writeScriptApi, type GenerateProgress } from '@/lib/generate';
 import { validateScript } from '@/lib/affirmations/validator';
 import { ARC, estimateRuntimeSec, formatDuration } from '@/lib/script/plan';
@@ -32,9 +32,16 @@ function Review() {
   useEffect(() => {
     if (!draftId) return;
     let alive = true;
-    void getDraft(draftId).then((d) => {
+    void (async () => {
+      const opened = await openDatabase();
+      if (!alive) return;
+      if (!opened.ok) {
+        setError(opened.message);
+        return;
+      }
+      const d = await getDraft(draftId);
       if (alive) setDraft(d ?? null);
-    });
+    })();
     return () => {
       alive = false;
     };
@@ -117,7 +124,18 @@ function Review() {
   }
 
   if (!draftId) return <Shell title="No draft">{null}</Shell>;
-  if (!draft) return <Shell title="Loading…">{null}</Shell>;
+  if (!draft) {
+    return (
+      <Shell title={error ? 'Cannot open storage' : 'Loading…'} back={{ href: '/', label: 'Library' }}>
+        {error && (
+          <div className="space-y-4">
+            <p className="text-sm leading-relaxed text-warm-300">{error}</p>
+            <Button onClick={() => window.location.reload()}>Reload</Button>
+          </div>
+        )}
+      </Shell>
+    );
+  }
 
   if (generating) {
     return (

@@ -26,11 +26,42 @@ interface NightscriptDB extends DBSchema {
   chunks: { key: string; value: { hash: string; pcm: ArrayBuffer; at: number } };
 }
 
+const DB_NAME = 'nightscript';
+const DB_VERSION = 2;
+
+/**
+ * Raised when the database cannot be opened because another tab is holding an older version
+ * open. Distinct from a generic failure because the fix is specific and the user can do it.
+ */
+export class DatabaseBlockedError extends Error {
+  constructor() {
+    super(
+      'Another tab has an older version of Nightscript open, which is stopping this one from ' +
+        'starting. Close the other Nightscript tabs and reload.',
+    );
+    this.name = 'DatabaseBlockedError';
+  }
+}
+
 let dbp: Promise<IDBPDatabase<NightscriptDB>> | null = null;
 
-function db() {
+/**
+ * Open the database.
+ *
+ * Three things here are scar tissue, all from the same incident: a schema version was
+ * deployed while the app was open in a tab, and every page that touched storage hung on
+ * "Loading…" forever with no error and no way back.
+ *
+ *  1. `blocking` — this tab is the one holding the OLD version open and stopping another tab
+ *     from upgrading. Close our connection so the other tab can proceed.
+ *  2. `blocked` — we are the tab trying to upgrade and someone else is in the way. Fail with
+ *     a message that names the actual fix instead of hanging.
+ *  3. The promise is no longer memoised through a rejection. Caching a rejected promise made
+ *     a single transient failure permanent for the life of the page.
+ */
+function db(): Promise<IDBPDatabase<NightscriptDB>> {
   if (!dbp) {
-    dbp = openDB<NightscriptDB>('nightscript', 2, {
+    dbp = openDB<NightscriptDB>(DB_NAME, DB_VERSION, {
       upgrade(d, oldVersion) {
         if (oldVersion < 1) {
           const tracks = d.createObjectStore('tracks', { keyPath: 'id' });
@@ -43,9 +74,39 @@ function db() {
           d.createObjectStore('chunks', { keyPath: 'hash' });
         }
       },
+      blocked() {
+        // Another tab is holding an older version. openDB's promise would otherwise never
+        // settle; rejecting turns an infinite spinner into a message.
+        throw new DatabaseBlockedError();
+      },
+      blocking() {
+        // We are the stale tab. Get out of the way so the newer one can upgrade.
+        void dbp?.then((d) => d.close()).catch(() => {});
+        dbp = null;
+      },
+      terminated() {
+        dbp = null;
+      },
+    }).catch((e) => {
+      // Never leave a rejected promise cached, or the page can never recover.
+      dbp = null;
+      throw e;
     });
   }
   return dbp;
+}
+
+/**
+ * Open the database, or explain why not. UI calls this so a storage failure surfaces as a
+ * sentence rather than a permanent spinner.
+ */
+export async function openDatabase(): Promise<{ ok: true } | { ok: false; message: string }> {
+  try {
+    await db();
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, message: (e as Error).message };
+  }
 }
 
 export async function listTracks(): Promise<TrackMeta[]> {

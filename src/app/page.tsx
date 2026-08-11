@@ -3,7 +3,15 @@
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { Button, Shell } from '@/components/ui';
-import { deleteDraft, deleteTrack, listDrafts, listTracks, storageEstimate, type Draft } from '@/lib/db';
+import {
+  deleteDraft,
+  deleteTrack,
+  listDrafts,
+  listTracks,
+  openDatabase,
+  storageEstimate,
+  type Draft,
+} from '@/lib/db';
 import { formatDuration } from '@/lib/script/plan';
 import type { TrackMeta } from '@/lib/types';
 
@@ -16,8 +24,16 @@ export default function Library() {
   const [tracks, setTracks] = useState<TrackMeta[] | null>(null);
   const [drafts, setDrafts] = useState<Draft[]>([]);
   const [storage, setStorage] = useState<{ usage: number; quota: number } | null>(null);
+  const [storageError, setStorageError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
+    const opened = await openDatabase();
+    if (!opened.ok) {
+      setStorageError(opened.message);
+      setTracks([]);
+      return;
+    }
+    setStorageError(null);
     const [t, d, s] = await Promise.all([listTracks(), listDrafts(), storageEstimate()]);
     setTracks(t);
     setDrafts(d.filter((x) => !t.some((tr) => tr.script === x.script)));
@@ -44,7 +60,16 @@ export default function Library() {
         Make a new track →
       </Link>
 
-      {tracks === null && <p className="text-sm text-ink-500">Loading…</p>}
+      {storageError && (
+        <div className="mb-8 rounded-xl border border-alert-400/40 bg-ink-900 p-4">
+          <p className="text-sm leading-relaxed text-warm-300">{storageError}</p>
+          <Button className="mt-3" onClick={() => window.location.reload()}>
+            Reload
+          </Button>
+        </div>
+      )}
+
+      {tracks === null && !storageError && <p className="text-sm text-ink-500">Loading…</p>}
 
       {tracks && tracks.length === 0 && drafts.length === 0 && (
         <p className="text-sm leading-relaxed text-ink-500">
