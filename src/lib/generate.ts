@@ -1,10 +1,19 @@
 'use client';
 
 import { authHeaders } from '@/lib/access';
+import { validateScript } from '@/lib/affirmations/validator';
 import { buildTimeline, planChunks, timelineDurationSec } from '@/lib/script/plan';
 import { assembleInBrowser, type ChunkPcm } from '@/lib/audio/webaudio';
 import { encodeMp3 } from '@/lib/audio/mp3';
-import type { Intake, Line, Measurement, Script, Section, TrackSettings } from '@/lib/types';
+import type {
+  Intake,
+  Line,
+  Measurement,
+  Script,
+  Section,
+  TrackSettings,
+  ValidationIssue,
+} from '@/lib/types';
 
 /**
  * Client-side generation.
@@ -153,35 +162,32 @@ export async function generateTrack(
  * come back in whatever order they finish and are reassembled into arc order here.
  */
 /**
- * The request plan. `core` is split in two because a single 40-line core call exceeds the
- * host's function limit — verified in production, where it returned 502 while the four
- * smaller sections all succeeded. The two halves get different emphasis notes so they do
- * not converge on the same lines.
+ * The request plan.
+ *
+ * Many small batches rather than five big ones, because the host kills any function at 30
+ * seconds and generation latency scales with how many lines are asked for. Measured: a
+ * 20-line batch died at 30.7 s; a 12-15 line batch returns in 10-20 s. Every batch is one
+ * model round-trip, and they all run at once.
  */
-const SCRIPT_REQUESTS: Array<{
-  section: Section;
-  lineCount?: number;
-  variantNote?: string;
-}> = [
-  { section: 'arrival' },
-  { section: 'downshift' },
-  {
-    section: 'core',
-    lineCount: 22,
-    variantNote:
-      'Weight this half towards implementation intentions and evidence anchored in their own past.',
-  },
-  {
-    section: 'core',
-    lineCount: 22,
-    variantNote:
-      'Weight this half towards values, process framing and permitted ambivalence. Do not repeat ideas already covered by intentions about their stated obstacle.',
-  },
-  { section: 'second' },
-  { section: 'dissolution' },
+const SCRIPT_REQUESTS: Array<{ section: Section; lineCount: number; variantNote?: string }> = [
+  { section: 'arrival', lineCount: 10, variantNote: 'Focus on arriving and putting the day down.' },
+  { section: 'arrival', lineCount: 10, variantNote: 'Focus on breath and on permission to stop listening.' },
+  { section: 'downshift', lineCount: 15, variantNote: 'Work downward from jaw and face to the chest.' },
+  { section: 'downshift', lineCount: 15, variantNote: 'Work downward from the belly to the feet.' },
+  { section: 'core', lineCount: 12, variantNote: 'Weight towards implementation intentions built from their stated obstacle.' },
+  { section: 'core', lineCount: 12, variantNote: 'Weight towards evidence anchored in the specific past moment they described.' },
+  { section: 'core', lineCount: 12, variantNote: 'Weight towards values and process framing.' },
+  { section: 'core', lineCount: 12, variantNote: 'Weight towards permitted ambivalence and self-compassion.' },
+  { section: 'second', lineCount: 12, variantNote: 'The gentler re-voicing. Compassion first.' },
+  { section: 'second', lineCount: 12, variantNote: 'The gentler re-voicing. Ambivalence and permission first.' },
+  { section: 'dissolution', lineCount: 15, variantNote: 'Fragments about the body settling.' },
+  { section: 'dissolution', lineCount: 15, variantNote: 'Fragments about letting the day go.' },
 ];
 
 const SECTION_ORDER: Section[] = ['arrival', 'downshift', 'core', 'second', 'dissolution'];
+
+/** Cap on repair round-trips, so a bad generation cannot fan out into fifty requests. */
+const MAX_REPAIRS = 12;
 
 export async function writeScript(
   intake: Intake,
@@ -191,7 +197,7 @@ export async function writeScript(
   let done = 0;
   onProgress('Writing the script…');
 
-  const results = await Promise.all(
+  const batches = await Promise.all(
     SCRIPT_REQUESTS.map(async (request) => {
       const res = await fetch('/api/script', {
         method: 'POST',
@@ -207,17 +213,60 @@ export async function writeScript(
         }
         throw new Error(`${request.section}: ${message}`);
       }
-      const json = (await res.json()) as { lines: Line[] };
+      const json = (await res.json()) as { lines: Line[]; issues: ValidationIssue[] };
       done++;
-      onProgress(`Writing the script — ${done} of ${SCRIPT_REQUESTS.length} parts`);
+      onProgress(`Writing the script — ${done} of ${SCRIPT_REQUESTS.length} passes`);
       return { section: request.section, lines: json.lines ?? [] };
     }),
   );
 
-  // Reassemble in arc order, not completion order.
-  const lines = SECTION_ORDER.flatMap((s) =>
-    results.filter((r) => r.section === s).flatMap((r) => r.lines),
+  let lines = SECTION_ORDER.flatMap((s) =>
+    batches.filter((b) => b.section === s).flatMap((b) => b.lines),
   );
+
+  // Repair whatever broke the rules, one short request per line. Anything still failing is
+  // dropped rather than shipped: at three to four repetitions per line, one bad line is
+  // heard a dozen times.
+  const problems = new Map<string, string[]>();
+  for (const issue of validateScript(lines, intake.goals)) {
+    if (issue.severity !== 'error') continue;
+    problems.set(issue.lineId, [
+      ...(problems.get(issue.lineId) ?? []),
+      `${issue.rule} (matched "${issue.match}")`,
+    ]);
+  }
+
+  if (problems.size > 0) {
+    onProgress(`Fixing ${problems.size} line${problems.size === 1 ? '' : 's'} that broke the rules…`);
+    const targets = [...problems.keys()].slice(0, MAX_REPAIRS);
+    const fixes = new Map<string, Line>();
+    await Promise.all(
+      targets.map(async (lineId) => {
+        const line = lines.find((l) => l.id === lineId);
+        if (!line) return;
+        const res = await fetch('/api/script', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...authHeaders() },
+          body: JSON.stringify({
+            intake,
+            repair: { line, problems: problems.get(lineId) ?? [] },
+          }),
+        });
+        if (!res.ok) return;
+        const json = (await res.json()) as { line: Line | null };
+        if (json.line) fixes.set(lineId, json.line);
+      }),
+    );
+    lines = lines.map((l) => fixes.get(l.id) ?? l);
+
+    const stillBad = new Set(
+      validateScript(lines, intake.goals)
+        .filter((i) => i.severity === 'error')
+        .map((i) => i.lineId),
+    );
+    lines = lines.filter((l) => !stillBad.has(l.id));
+  }
+
   if (lines.length === 0) throw new Error('The writer returned nothing usable.');
   return { lines, cycles: 1 };
 }

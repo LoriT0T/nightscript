@@ -208,9 +208,64 @@ export interface GenerateSectionResult {
 }
 
 /**
- * Generate ONE section, validate it, make one repair pass over the failures, and drop
- * anything still failing. Nothing that breaks the rules ships: at three to four repetitions
- * per line, one bad line is heard a dozen times (docs/AFFIRMATION-DESIGN.md §9c).
+ * Generate one batch of lines. NO repair pass.
+ *
+ * The repair call used to happen here, in the same request. That made a request two model
+ * round-trips deep, and the host kills a function at 30 s — measured exactly: an `arrival`
+ * request died at 30.7 s while a `dissolution` request survived at 24.1 s. The difference
+ * was luck, not size. Repair is now the client's job, one short request per bad line, so no
+ * single server call ever contains more than one model round-trip.
+ */
+export async function generateSectionLines(
+  intake: Intake,
+  minutes: number,
+  section: Section,
+  lineCount?: number,
+  variantNote?: string,
+): Promise<Line[]> {
+  const raw = await generateOnce(buildSectionPrompt(intake, minutes, section, lineCount, variantNote));
+  // The model occasionally mislabels the section; this call only asked for one.
+  return parseScriptJson(raw, intake.goals).map((l) => ({ ...l, section }));
+}
+
+/** Rewrite one line that failed validation. Used by the client and by the CLI. */
+export async function repairLine(
+  intake: Intake,
+  line: Line,
+  problems: string[],
+): Promise<Line | null> {
+  const goal = intake.goals.find((g) => g.id === line.goalId);
+  const prompt = `Rewrite this line of a sleep affirmation script so it keeps its meaning and its
+pattern while fixing the stated problem.
+
+Line: "${line.text}"
+Pattern it must keep: ${line.pattern}
+Problem: ${problems.join('; ')}
+${goal ? `It serves this goal: ${goal.text}. Believability ${goal.believability}/10.${goal.believability < 4 ? ' LOW — no present-tense state claims at all.' : ''}` : ''}
+${goal?.sensitive ? 'Addiction / mental-health goal: urge-surfing framing only, no shame, no absolutes.' : ''}
+
+Rules: first person only, no second person, no absolute trait claims, no superlatives
+(always, never, completely, perfectly), no questions or interrogative phrasing, no exclamation
+marks, no mystical or wealth framing. Short sentence, falling at the end. If the pattern is
+"intention" it must contain a concrete "when …" cue.
+
+Return ONLY JSON: {"lines":[{"text":"…","pattern":"${line.pattern}","section":"${line.section}","goalId":${goal ? `"${goal.id}"` : 'null'}}]}`;
+
+  try {
+    const parsed = parseScriptJson(await generateOnce(prompt), intake.goals);
+    if (!parsed.length) return null;
+    const candidate: Line = { ...line, text: parsed[0].text };
+    return validateScript([candidate], intake.goals).some((i) => i.severity === 'error')
+      ? null
+      : candidate;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Whole-script generation for the CLI, which has no 30-second ceiling. The browser takes the
+ * parallel path in src/lib/generate.ts instead.
  */
 export async function generateSection(
   intake: Intake,
@@ -219,54 +274,34 @@ export async function generateSection(
   lineCount?: number,
   variantNote?: string,
 ): Promise<GenerateSectionResult> {
-  let lines = parseScriptJson(
-    await generateOnce(buildSectionPrompt(intake, minutes, section, lineCount, variantNote)),
-    intake.goals,
-  );
-  // The model occasionally labels a line with the wrong section; this call only asked for one.
-  lines = lines.map((l) => ({ ...l, section }));
+  let lines = await generateSectionLines(intake, minutes, section, lineCount, variantNote);
+
+  const issues = validateScript(lines, intake.goals).filter((i) => i.severity === 'error');
+  const byLine = new Map<string, string[]>();
+  for (const i of issues) {
+    byLine.set(i.lineId, [...(byLine.get(i.lineId) ?? []), `${i.rule} (matched "${i.match}")`]);
+  }
 
   let repairedCount = 0;
-  const issues = validateScript(lines, intake.goals);
-  const badIds = new Set(issues.filter((i) => i.severity === 'error').map((i) => i.lineId));
-
-  if (badIds.size > 0) {
-    const bad = lines.filter((l) => badIds.has(l.id));
-    const byLine = new Map<string, string[]>();
-    for (const i of issues.filter((x) => x.severity === 'error')) {
-      byLine.set(i.lineId, [...(byLine.get(i.lineId) ?? []), `${i.rule} (matched "${i.match}")`]);
-    }
-
-    const repairPrompt = `These lines from an affirmation script broke the rules. Rewrite each one
-to keep its meaning and its pattern while fixing the stated problem. Same rules as before: first
-person only, no absolute trait claims, no superlatives, no second person, no questions or
-interrogative phrasing, no exclamation marks, no mystical or wealth framing.
-Implementation-intention lines must contain a concrete "when …" cue.
-
-${bad.map((l, i) => `${i + 1}. [${l.pattern}] "${l.text}"\n   PROBLEM: ${(byLine.get(l.id) ?? []).join('; ')}`).join('\n')}
-
-Return ONLY JSON: {"lines":[{"text":"…","pattern":"…","section":"${section}","goalId":"…"}]} in
-the same order, one replacement per input line.`;
-
-    try {
-      const replacements = parseScriptJson(await generateOnce(repairPrompt), intake.goals);
-      lines = lines.map((l) => {
-        if (!badIds.has(l.id)) return l;
-        const rep = replacements[bad.findIndex((b) => b.id === l.id)];
-        if (!rep) return l;
-        const candidate: Line = { ...l, text: rep.text };
-        if (validateScript([candidate], intake.goals).some((i) => i.severity === 'error')) return l;
-        repairedCount++;
-        return candidate;
-      });
-    } catch {
-      // Repair failed entirely; the drop below is the backstop.
-    }
+  if (byLine.size > 0) {
+    const repaired = await Promise.all(
+      lines.map(async (l) => {
+        const problems = byLine.get(l.id);
+        if (!problems) return l;
+        const fixed = await repairLine(intake, l, problems);
+        if (fixed) repairedCount++;
+        return fixed ?? l;
+      }),
+    );
+    lines = repaired;
   }
 
   const stillBad = new Set(
     validateScript(lines, intake.goals).filter((i) => i.severity === 'error').map((i) => i.lineId),
   );
-  const droppedCount = stillBad.size;
-  return { lines: lines.filter((l) => !stillBad.has(l.id)), repairedCount, droppedCount };
+  return {
+    lines: lines.filter((l) => !stillBad.has(l.id)),
+    repairedCount,
+    droppedCount: stillBad.size,
+  };
 }
