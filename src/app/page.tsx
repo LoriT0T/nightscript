@@ -6,6 +6,7 @@ import { Button, Shell } from '@/components/ui';
 import {
   deleteDraft,
   deleteTrack,
+  getAudio,
   listDrafts,
   listTracks,
   openDatabase,
@@ -13,7 +14,7 @@ import {
   type Draft,
 } from '@/lib/db';
 import { formatDuration } from '@/lib/script/plan';
-import { EXAMPLES } from '@/lib/examples';
+import { EXAMPLES, exampleUrl } from '@/lib/examples';
 import type { TrackMeta } from '@/lib/types';
 
 /**
@@ -21,6 +22,28 @@ import type { TrackMeta } from '@/lib/types';
  * listened in 4 days", no badges, no reminders. This runs at bedtime for someone trying to
  * sleep; every retention mechanic is a reason to be awake.
  */
+/**
+ * Save a track out as a file.
+ *
+ * Tracks live in this browser's storage, which is the right default but makes them awkward
+ * to move: a track generated on a laptop cannot be reached from a phone, and clearing site
+ * data takes it with it. This is the escape hatch — the same bytes, on disk, playable in
+ * anything.
+ */
+async function saveToFile(name: string, source: string | Blob, mime: string) {
+  const blob = typeof source === 'string' ? await (await fetch(source)).blob() : source;
+  const ext = mime.includes('mpeg') ? 'mp3' : mime.includes('mp4') ? 'm4a' : 'webm';
+  const safe = name.replace(/[^\w\s-]/g, '').trim().replace(/\s+/g, '-').toLowerCase() || 'nightscript';
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `${safe}.${ext}`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 30_000);
+}
+
 export default function Library() {
   const [tracks, setTracks] = useState<TrackMeta[] | null>(null);
   const [drafts, setDrafts] = useState<Draft[]>([]);
@@ -89,16 +112,24 @@ export default function Library() {
           <ul className="space-y-2">
             {EXAMPLES.map((e) => (
               <li key={e.id} className="rounded-xl border border-ink-800 bg-ink-900/40 p-4">
-                <Link href={`/play?ex=${e.id}`} className="block">
-                  <p className="text-sm text-ink-100">{e.name}</p>
-                  <p className="mt-1 text-xs text-ink-500">
-                    {formatDuration(e.durationSec)} · {(e.bytes / 1e6).toFixed(1)} MB · {e.voice}
-                  </p>
-                  <p className="mt-1 text-xs leading-relaxed text-ink-600">{e.goals.join(' · ')}</p>
-                  <p className="mt-1 text-xs tabular-nums text-ink-600">
-                    {e.lufs.toFixed(1)} LUFS · peak {e.truePeakDb.toFixed(1)} dBTP
-                  </p>
-                </Link>
+                <div className="flex items-start justify-between gap-4">
+                  <Link href={`/play?ex=${e.id}`} className="min-w-0 flex-1">
+                    <p className="text-sm text-ink-100">{e.name}</p>
+                    <p className="mt-1 text-xs text-ink-500">
+                      {formatDuration(e.durationSec)} · {(e.bytes / 1e6).toFixed(1)} MB · {e.voice}
+                    </p>
+                    <p className="mt-1 text-xs leading-relaxed text-ink-600">{e.goals.join(' · ')}</p>
+                    <p className="mt-1 text-xs tabular-nums text-ink-600">
+                      {e.lufs.toFixed(1)} LUFS · peak {e.truePeakDb.toFixed(1)} dBTP
+                    </p>
+                  </Link>
+                  <button
+                    onClick={() => saveToFile(e.name, exampleUrl(e), e.mime)}
+                    className="text-xs text-ink-500 hover:text-ink-300"
+                  >
+                    save
+                  </button>
+                </div>
               </li>
             ))}
           </ul>
@@ -130,6 +161,15 @@ export default function Library() {
                     )}
                   </Link>
                   <div className="flex flex-col items-end gap-1">
+                    <button
+                      onClick={async () => {
+                        const blob = await getAudio(t.id);
+                        if (blob) await saveToFile(t.name, blob, t.mime);
+                      }}
+                      className="text-xs text-ink-500 hover:text-ink-300"
+                    >
+                      save
+                    </button>
                     <Link
                       href={`/new?from=${t.id}`}
                       className="text-xs text-ink-500 hover:text-ink-300"

@@ -5,7 +5,7 @@ import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { getAudio, getTrack } from '@/lib/db';
 import { exampleUrl, findExample } from '@/lib/examples';
-import { formatDuration } from '@/lib/script/plan';
+import { Scrubber } from '@/components/scrubber';
 import type { TrackMeta } from '@/lib/types';
 
 /**
@@ -65,7 +65,11 @@ function Player() {
   const [playing, setPlaying] = useState(false);
   const [position, setPosition] = useState(0);
   const [duration, setDuration] = useState(0);
-  const [volume, setVolume] = useState(0.7);
+  const [volume, setVolume] = useState(() => {
+    if (typeof localStorage === 'undefined') return 0.7;
+    const saved = Number(localStorage.getItem('nightscript.volume'));
+    return Number.isFinite(saved) && saved > 0 ? Math.min(1, saved) : 0.7;
+  });
   const [timerMin, setTimerMin] = useState<number>(0);
   const [dim, setDim] = useState(false);
   const [unsupported, setUnsupported] = useState(false);
@@ -132,6 +136,18 @@ function Player() {
     };
   }, [timerMin, playing, volume]);
 
+  const seek = useCallback((sec: number) => {
+    const el = audioRef.current;
+    if (!el || !Number.isFinite(sec)) return;
+    el.currentTime = Math.min(Math.max(0, sec), el.duration || sec);
+    setPosition(el.currentTime);
+  }, []);
+
+  const skip = useCallback(
+    (delta: number) => seek((audioRef.current?.currentTime ?? 0) + delta),
+    [seek],
+  );
+
   // Lock-screen controls.
   useEffect(() => {
     if (!meta || !('mediaSession' in navigator)) return;
@@ -142,19 +158,44 @@ function Player() {
     });
     navigator.mediaSession.setActionHandler('play', () => void audioRef.current?.play());
     navigator.mediaSession.setActionHandler('pause', () => audioRef.current?.pause());
-    // Deliberately no seek / next / previous handlers: nothing on the lock screen should
-    // invite fiddling at 2am.
+    // Seeking from the lock screen, so you do not have to unlock the phone to move a minute
+    // back. Still no next/previous — there is nothing to skip to.
+    navigator.mediaSession.setActionHandler('seekbackward', (d) => skip(-(d.seekOffset ?? 60)));
+    navigator.mediaSession.setActionHandler('seekforward', (d) => skip(d.seekOffset ?? 60));
+    try {
+      navigator.mediaSession.setActionHandler('seekto', (d) => {
+        if (d.seekTime != null) seek(d.seekTime);
+      });
+    } catch {
+      // Older browsers do not know 'seekto'; the offsets above still work.
+    }
     return () => {
-      navigator.mediaSession.setActionHandler('play', null);
-      navigator.mediaSession.setActionHandler('pause', null);
+      for (const a of ['play', 'pause', 'seekbackward', 'seekforward', 'seekto'] as const) {
+        try {
+          navigator.mediaSession.setActionHandler(a, null);
+        } catch {
+          /* ignore actions this browser does not support */
+        }
+      }
     };
-  }, [meta]);
+  }, [meta, seek, skip]);
 
   useEffect(() => {
-    if ('mediaSession' in navigator) {
-      navigator.mediaSession.playbackState = playing ? 'playing' : 'paused';
+    if (!('mediaSession' in navigator)) return;
+    navigator.mediaSession.playbackState = playing ? 'playing' : 'paused';
+    // Without this the lock-screen scrubber sits at zero and cannot be dragged.
+    if (duration > 0 && 'setPositionState' in navigator.mediaSession) {
+      try {
+        navigator.mediaSession.setPositionState({
+          duration,
+          position: Math.min(position, duration),
+          playbackRate: 1,
+        });
+      } catch {
+        /* a position briefly out of range while seeking is not worth throwing over */
+      }
     }
-  }, [playing]);
+  }, [playing, position, duration]);
 
   async function toggle() {
     const el = audioRef.current;
@@ -195,16 +236,22 @@ function Player() {
         <div className="flex flex-1 flex-col items-center justify-center gap-10 px-6">
           <div className="text-center">
             <h1 className="text-base font-normal text-ink-300">{meta?.name ?? '—'}</h1>
-            <p className="mt-2 text-sm tabular-nums text-ink-500">
-              {formatDuration(position)} / {formatDuration(duration || meta?.durationSec || 0)}
-            </p>
           </div>
 
-          <button
-            onClick={toggle}
-            aria-label={playing ? 'Pause' : 'Play'}
-            className="flex h-40 w-40 items-center justify-center rounded-full border border-ink-700 bg-ink-900 active:bg-ink-850"
-          >
+          <div className="flex items-center gap-6">
+            <button
+              onClick={() => skip(-60)}
+              aria-label="Back one minute"
+              className="flex h-16 w-16 items-center justify-center rounded-full border border-ink-800 text-sm text-ink-400 active:bg-ink-850"
+            >
+              −1m
+            </button>
+
+            <button
+              onClick={toggle}
+              aria-label={playing ? 'Pause' : 'Play'}
+              className="flex h-40 w-40 items-center justify-center rounded-full border border-ink-700 bg-ink-900 active:bg-ink-850"
+            >
             {playing ? (
               <span className="flex gap-3">
                 <span className="block h-12 w-3.5 rounded-sm bg-ink-400" />
@@ -216,7 +263,25 @@ function Player() {
                 style={{ borderLeftColor: 'var(--color-ink-400)' }}
               />
             )}
-          </button>
+            </button>
+
+            <button
+              onClick={() => skip(60)}
+              aria-label="Forward one minute"
+              className="flex h-16 w-16 items-center justify-center rounded-full border border-ink-800 text-sm text-ink-400 active:bg-ink-850"
+            >
+              +1m
+            </button>
+          </div>
+
+          <div className="w-full max-w-md">
+            <Scrubber
+              position={position}
+              duration={duration || meta?.durationSec || 0}
+              onSeek={seek}
+              disabled={!url}
+            />
+          </div>
 
           <div className="w-full max-w-xs">
             <input
@@ -230,6 +295,7 @@ function Player() {
                 const v = Number(e.target.value);
                 setVolume(v);
                 if (audioRef.current) audioRef.current.volume = v;
+                localStorage.setItem('nightscript.volume', String(v));
               }}
               className="h-11 w-full"
             />

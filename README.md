@@ -179,6 +179,22 @@ Nothing is stored. There is no account, no database, and no server-side copy of 
   that editing one line does not re-spend the whole hour. Delete that directory to clear them.
 - The API key is read from `process.env` on the server and never sent to the browser.
 
+## The player
+
+Play, pause, sleep timer, volume — and now a seek bar, because moving around a sixty-minute
+track is a fair thing to want. It is built to be hit deliberately and not by accident: a
+hairline track inside a 44-pixel touch band, no bright fill, and a handle that grows only while
+you drag.
+
+The tick marks are the useful part. Every track has the same known shape, so they let you jump
+straight to the core affirmations instead of hunting for where the body scan ends. The label
+under the bar names the section you are in.
+
+Also: ±1 minute buttons, arrow keys (Shift for five minutes), lock-screen scrubbing via the
+Media Session API, volume remembered between nights, and **save** on any track in the library
+to write the audio out as a file — storage is per-browser, so that is how a track gets from a
+laptop to a phone.
+
 ## What this does not have
 
 No streaks, no badges, no reminders, no notifications, no social features, nothing that turns
