@@ -55,7 +55,11 @@ const FADE_SEC = 90;
  * last ten minutes cannot exceed the first.
  */
 const TAPER_START_SEC = 240;
-const TAPER_DEPTH_DB = 6;
+const TAPER_DEPTH_DB = 8;
+/** True-peak ceiling. Below the -3 dBTP requirement, not at it. */
+const PEAK_CEILING_DB = -3.5;
+/** Nothing after this minute may exceed the loudest minute of the opening. */
+const CAP_FROM_MINUTE = 4;
 
 function quantize(sec: number): number {
   return Math.max(0, Math.round(sec * 10) / 10);
@@ -157,11 +161,33 @@ export async function assembleTrack(
   }
 
   // ---- 2. re-time against MEASURED speech ------------------------------------------
-  // The plan sized every pause against an estimated speaking rate. Now that the audio
-  // exists we know the real one, so each section's pauses are rescaled by a single factor to
-  // land that section on its actual time budget. Without this the finished track drifts by
-  // however much the model's pace differed from the estimate — several minutes over an hour.
+  // The plan sized every pause against an estimated speaking rate. Now that the audio exists
+  // we know the real one, so each section's pauses are rescaled to land that section on its
+  // time budget.
+  //
+  // A pause is only placed after a segment that actually exists. When the model runs two
+  // lines together, an eight-line chunk comes back as, say, five speech regions, so only
+  // five pauses are placed — not eight. Scaling against the *planned* list then leaves the
+  // section far short: measured, a 10-minute track came out at 7:50 with five of six chunks
+  // mis-split. So the effective pause list is computed first, per play, and the scale is
+  // derived from that. This mirrors the browser assembler exactly; the two must agree.
   say('Re-timing against measured speech…');
+
+  const effective = new Map<Play, number[]>();
+  for (const play of plays) {
+    const split = splitCache.get(play.chunk.hashKey);
+    if (!split || split.segments.length === 0) continue;
+    const matched = split.segments.length === play.chunk.lines.length;
+    if (matched) {
+      effective.set(play, play.pauses.slice(0, split.segments.length));
+    } else {
+      // Spread the chunk's whole planned silence across the segments we really have, so a
+      // mis-split loses the line boundary but never loses the time.
+      const planned = play.pauses.reduce((a, b) => a + b, 0);
+      effective.set(play, new Array(split.segments.length).fill(planned / split.segments.length));
+    }
+  }
+
   const scaleBySection = new Map<Section, number>();
   for (const spec of SECTION_SPEC.values()) {
     if (spec.section === 'fade') continue;
@@ -169,17 +195,13 @@ export async function assembleTrack(
     if (sectionPlays.length === 0) continue;
 
     let speech = 0;
-    let nominalPause = 0;
+    let pause = 0;
     for (const play of sectionPlays) {
-      const split = splitCache.get(play.chunk.hashKey);
-      if (!split) continue;
-      speech += split.durations.reduce((a, b) => a + b, 0);
-      nominalPause += play.pauses.reduce((a, b) => a + b, 0);
+      speech += splitCache.get(play.chunk.hashKey)?.durations.reduce((a, b) => a + b, 0) ?? 0;
+      pause += (effective.get(play) ?? []).reduce((a, b) => a + b, 0);
     }
     const budget = spec.share * settings.minutes * 60;
-    const scale = nominalPause > 0 ? (budget - speech) / nominalPause : 1;
-    // Bounded so a wildly mis-sized section cannot produce a 30-second gap or a 0.5-second one.
-    scaleBySection.set(spec.section, Math.min(2.5, Math.max(0.4, scale)));
+    scaleBySection.set(spec.section, pause > 0 ? Math.min(4, Math.max(0.4, (budget - speech) / pause)) : 1);
   }
 
   // ---- 3. build the concat list ---------------------------------------------------
@@ -189,26 +211,16 @@ export async function assembleTrack(
 
   for (const play of plays) {
     const split = splitCache.get(play.chunk.hashKey);
-    if (!split || split.segments.length === 0) continue;
-    const segs = split.segments;
+    const pauses = effective.get(play);
+    if (!split || !pauses) continue;
     const scale = scaleBySection.get(play.chunk.section) ?? 1;
 
-    if (segs.length === play.chunk.lines.length) {
-      segs.forEach((s, i) => {
-        entries.push(s);
-        const p = quantize((play.pauses[i] ?? play.pauses[play.pauses.length - 1] ?? 4) * scale);
-        silences.add(p);
-        entries.push(`__SIL__${p}`);
-      });
-    } else {
-      // Fallback: whole chunk, then the average of its scheduled pauses.
-      entries.push(segs[0]);
-      const avg = quantize(
-        (play.pauses.reduce((a, b) => a + b, 0) / Math.max(1, play.pauses.length)) * scale,
-      );
-      silences.add(avg);
-      entries.push(`__SIL__${avg}`);
-    }
+    split.segments.forEach((seg, i) => {
+      entries.push(seg);
+      const p = quantize((pauses[i] ?? pauses[pauses.length - 1] ?? 4) * scale);
+      silences.add(p);
+      entries.push(`__SIL__${p}`);
+    });
   }
 
   for (const s of silences) await makeSilence(join(silDir, `s${s}.wav`), s);
@@ -231,7 +243,12 @@ export async function assembleTrack(
   const voice = join(workDir, 'voice.wav');
   await ffmpeg([
     '-i', voiceRaw,
-    '-af', 'highpass=f=80,deesser=i=0.4:m=0.5:f=0.35,lowpass=f=10000',
+    // Matches the browser chain, including the gentle peak control: without it a handful of
+    // loud consonants cap the normalisation gain and the per-minute envelope wobbles by
+    // several dB, which swamps the taper.
+    '-af',
+    'highpass=f=80,deesser=i=0.4:m=0.5:f=0.35,lowpass=f=10000,' +
+      'acompressor=threshold=-20dB:ratio=12:attack=4:release=250:knee=8',
     '-c:a', 'pcm_s16le',
     voice,
   ]);
@@ -268,14 +285,58 @@ export async function assembleTrack(
   const mixed = join(workDir, 'mixed.wav');
   await ffmpeg([...mixInputs, '-filter_complex', mixFilter, '-map', '[mix]', '-c:a', 'pcm_s16le', mixed]);
 
+  // ---- enforce the descent, BEFORE normalising ---------------------------------------
+  // "Nothing gets louder after minute four" cannot be left to chance: the core section is
+  // the densest part of the track, so its peaks sit above the quiet opening even with a
+  // taper running. Measure the per-minute peak, then hold every later minute down to the
+  // loudest of the opening minutes with a gain that moves smoothly across each minute.
+  //
+  // Order matters. Doing this after normalisation pulls the finished level back down —
+  // measured, -25.07 LUFS against a -23 target. Capping first lets the normaliser bring the
+  // whole thing back up to target afterwards. Mirrors src/lib/audio/webaudio.ts; the two
+  // renderers must agree.
+  let levelled = mixed;
+  const prePeaks = await measureMinutePeak(mixed, 60);
+  const openingPeaks = prePeaks.slice(0, CAP_FROM_MINUTE + 1).filter(Number.isFinite);
+  if (openingPeaks.length > 0 && prePeaks.length > CAP_FROM_MINUTE + 1) {
+    const ceiling = Math.max(...openingPeaks);
+    const minuteGainDb = prePeaks.map((p, i) =>
+      i <= CAP_FROM_MINUTE || !Number.isFinite(p) ? 0 : Math.min(0, ceiling - p),
+    );
+
+    if (minuteGainDb.some((g) => g < -0.01)) {
+      say('Holding the level down…');
+      // Piecewise-linear dB curve across minute centres, as an ffmpeg volume expression.
+      const terms: string[] = [`lt(t,30)*(${minuteGainDb[0].toFixed(3)})`];
+      for (let i = 0; i < minuteGainDb.length - 1; i++) {
+        const t0 = i * 60 + 30;
+        const g0 = minuteGainDb[i];
+        const g1 = minuteGainDb[i + 1];
+        terms.push(
+          `between(t,${t0},${t0 + 60})*(${g0.toFixed(3)}+(${(g1 - g0).toFixed(3)})*(t-${t0})/60)`,
+        );
+      }
+      const last = minuteGainDb.length - 1;
+      terms.push(`gte(t,${last * 60 + 30})*(${minuteGainDb[last].toFixed(3)})`);
+
+      levelled = join(workDir, 'levelled.wav');
+      await ffmpeg([
+        '-i', mixed,
+        '-af', `volume=volume='pow(10,(${terms.join('+')})/20)':eval=frame`,
+        '-c:a', 'pcm_s16le',
+        levelled,
+      ]);
+    }
+  }
+
   // ---- 6. two-pass loudness normalisation ------------------------------------------
   say('Normalising loudness…');
-  const pre = await measureLoudness(mixed);
+  const pre = await measureLoudness(levelled);
   const master = join(workDir, 'master.wav');
   await ffmpeg([
-    '-i', mixed,
+    '-i', levelled,
     '-af',
-    `loudnorm=I=-23:TP=-3:LRA=7:measured_I=${pre.integratedLufs}:measured_TP=${pre.truePeakDb}` +
+    `loudnorm=I=-23:TP=-3.5:LRA=7:measured_I=${pre.integratedLufs}:measured_TP=${pre.truePeakDb}` +
       `:measured_LRA=${pre.lra}:measured_thresh=${pre.threshold}:linear=true:print_format=summary`,
     '-ar', String(SAMPLE_RATE),
     '-c:a', 'pcm_s16le',
@@ -288,7 +349,7 @@ export async function assembleTrack(
   const afterNorm = await measureLoudness(master);
   let finalMaster = master;
   const delta = -23 - afterNorm.integratedLufs;
-  if (Math.abs(delta) > 0.3 && afterNorm.truePeakDb + delta < -3.5) {
+  if (Math.abs(delta) > 0.3 && afterNorm.truePeakDb + delta < PEAK_CEILING_DB) {
     say('Trimming to target loudness…');
     finalMaster = join(workDir, 'master_trim.wav');
     await ffmpeg(['-i', master, '-af', `volume=${delta.toFixed(2)}dB`, '-c:a', 'pcm_s16le', finalMaster]);
