@@ -80,10 +80,26 @@ material where you can.`,
  */
 export function sectionLineTarget(minutes: number, section: Section): number {
   const counts = targetLineCounts(minutes);
-  const uniqueCore = Math.max(40, Math.min(60, Math.round(counts.core / 3.5)));
-  if (section === 'core') return uniqueCore;
-  if (section === 'second') return Math.max(12, Math.round(uniqueCore * 0.45));
+  if (section === 'core') return uniqueCoreCount(minutes);
+  if (section === 'second') {
+    return Math.max(4, Math.round(uniqueCoreCount(minutes) * 0.45));
+  }
   return counts[section] ?? 20;
+}
+
+/**
+ * How many unique core affirmations to write.
+ *
+ * The brief's "40 to 60 core affirmations, cycled three to four times" is a figure for a
+ * 60-minute track. Applied as a flat floor it wrecks short ones: a 10-minute track got the
+ * same 146 lines as an hour and overran its target by 2:14 with the pauses already
+ * compressed to their floor. So the floor scales with the requested length, and the brief's
+ * number is what it produces at 60 minutes.
+ */
+function uniqueCoreCount(minutes: number): number {
+  const counts = targetLineCounts(minutes);
+  const floor = Math.max(6, Math.round(40 * (minutes / 60)));
+  return Math.max(floor, Math.min(60, Math.round(counts.core / 3.5)));
 }
 
 export function buildSectionPrompt(
@@ -93,8 +109,7 @@ export function buildSectionPrompt(
   lineCount?: number,
   variantNote?: string,
 ): string {
-  const counts = targetLineCounts(minutes);
-  const uniqueCore = Math.max(40, Math.min(60, Math.round(counts.core / 3.5)));
+  const uniqueCore = uniqueCoreCount(minutes);
   const brief = SECTION_BRIEF[section as Exclude<Section, 'fade'>];
   const wanted = lineCount ?? sectionLineTarget(minutes, section);
 

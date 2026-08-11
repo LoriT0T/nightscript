@@ -3,6 +3,7 @@
 import { authHeaders } from '@/lib/access';
 import { getCachedChunk, putCachedChunk } from '@/lib/db';
 import { validateScript } from '@/lib/affirmations/validator';
+import { sectionLineTarget } from '@/lib/gemini/script';
 import { buildTimeline, planChunks, timelineDurationSec } from '@/lib/script/plan';
 import { assembleInBrowser, type ChunkPcm } from '@/lib/audio/webaudio';
 import { encodeMp3 } from '@/lib/audio/mp3';
@@ -208,27 +209,79 @@ export async function generateTrack(
  * come back in whatever order they finish and are reassembled into arc order here.
  */
 /**
- * The request plan.
+ * The request plan, built for the requested length.
  *
- * Many small batches rather than five big ones, because the host kills any function at 30
- * seconds and generation latency scales with how many lines are asked for. Measured: a
- * 20-line batch died at 30.7 s; a 12-15 line batch returns in 10-20 s. Every batch is one
- * model round-trip, and they all run at once.
+ * Two constraints shape this. The host kills any function at 30 seconds and latency scales
+ * with how many lines are asked for, so a section is split across several small batches that
+ * all run at once — measured, a 20-line batch died at 30.7 s while a 12-15 line batch returns
+ * in 10-20 s. And the totals have to track the target duration: hardcoding them gave a
+ * 10-minute track the same 146 lines as an hour, which overran by 2:14 with the pauses
+ * already at their floor.
  */
-const SCRIPT_REQUESTS: Array<{ section: Section; lineCount: number; variantNote?: string }> = [
-  { section: 'arrival', lineCount: 10, variantNote: 'Focus on arriving and putting the day down.' },
-  { section: 'arrival', lineCount: 10, variantNote: 'Focus on breath and on permission to stop listening.' },
-  { section: 'downshift', lineCount: 15, variantNote: 'Work downward from jaw and face to the chest.' },
-  { section: 'downshift', lineCount: 15, variantNote: 'Work downward from the belly to the feet.' },
-  { section: 'core', lineCount: 12, variantNote: 'Weight towards implementation intentions built from their stated obstacle.' },
-  { section: 'core', lineCount: 12, variantNote: 'Weight towards evidence anchored in the specific past moment they described.' },
-  { section: 'core', lineCount: 12, variantNote: 'Weight towards values and process framing.' },
-  { section: 'core', lineCount: 12, variantNote: 'Weight towards permitted ambivalence and self-compassion.' },
-  { section: 'second', lineCount: 12, variantNote: 'The gentler re-voicing. Compassion first.' },
-  { section: 'second', lineCount: 12, variantNote: 'The gentler re-voicing. Ambivalence and permission first.' },
-  { section: 'dissolution', lineCount: 15, variantNote: 'Fragments about the body settling.' },
-  { section: 'dissolution', lineCount: 15, variantNote: 'Fragments about letting the day go.' },
+const SECTION_BATCHES: Array<{ section: Section; notes: string[] }> = [
+  {
+    section: 'arrival',
+    notes: [
+      'Focus on arriving and putting the day down.',
+      'Focus on breath and on permission to stop listening.',
+    ],
+  },
+  {
+    section: 'downshift',
+    notes: [
+      'Work downward from jaw and face to the chest.',
+      'Work downward from the belly to the feet.',
+    ],
+  },
+  {
+    section: 'core',
+    notes: [
+      'Weight towards implementation intentions built from their stated obstacle.',
+      'Weight towards evidence anchored in the specific past moment they described.',
+      'Weight towards values and process framing.',
+      'Weight towards permitted ambivalence and self-compassion.',
+    ],
+  },
+  {
+    section: 'second',
+    notes: [
+      'The gentler re-voicing. Compassion first.',
+      'The gentler re-voicing. Ambivalence and permission first.',
+    ],
+  },
+  {
+    section: 'dissolution',
+    notes: ['Fragments about the body settling.', 'Fragments about letting the day go.'],
+  },
 ];
+
+/** Never ask for more than this in one request — it is what keeps a call inside 30 seconds. */
+const MAX_LINES_PER_REQUEST = 15;
+
+function planScriptRequests(
+  minutes: number,
+): Array<{ section: Section; lineCount: number; variantNote: string }> {
+  const out: Array<{ section: Section; lineCount: number; variantNote: string }> = [];
+
+  for (const { section, notes } of SECTION_BATCHES) {
+    const total = sectionLineTarget(minutes, section);
+    if (total <= 0) continue;
+    // Use as few batches as the per-request ceiling allows, so short tracks do not fan out
+    // into a dozen requests for four lines each.
+    const batches = Math.max(1, Math.min(notes.length, Math.ceil(total / MAX_LINES_PER_REQUEST)));
+    const base = Math.floor(total / batches);
+    let remainder = total - base * batches;
+
+    for (let i = 0; i < batches; i++) {
+      const extra = remainder > 0 ? 1 : 0;
+      remainder -= extra;
+      const lineCount = base + extra;
+      if (lineCount <= 0) continue;
+      out.push({ section, lineCount, variantNote: notes[i] });
+    }
+  }
+  return out;
+}
 
 const SECTION_ORDER: Section[] = ['arrival', 'downshift', 'core', 'second', 'dissolution'];
 
@@ -241,10 +294,11 @@ export async function writeScript(
   onProgress: (message: string) => void,
 ): Promise<Script> {
   let done = 0;
+  const requests = planScriptRequests(minutes);
   onProgress('Writing the script…');
 
   const batches = await Promise.all(
-    SCRIPT_REQUESTS.map(async (request) => {
+    requests.map(async (request) => {
       const res = await fetch('/api/script', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...authHeaders() },
@@ -261,7 +315,7 @@ export async function writeScript(
       }
       const json = (await res.json()) as { lines: Line[]; issues: ValidationIssue[] };
       done++;
-      onProgress(`Writing the script — ${done} of ${SCRIPT_REQUESTS.length} passes`);
+      onProgress(`Writing the script — ${done} of ${requests.length} passes`);
       return { section: request.section, lines: json.lines ?? [] };
     }),
   );
