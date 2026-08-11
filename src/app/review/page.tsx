@@ -8,7 +8,7 @@ import { getDraft, saveDraft, saveTrack, newId, type Draft } from '@/lib/db';
 import { generateTrack, writeScript as writeScriptApi, type GenerateProgress } from '@/lib/generate';
 import { validateScript } from '@/lib/affirmations/validator';
 import { ARC, estimateRuntimeSec, formatDuration } from '@/lib/script/plan';
-import { PATTERN_LABEL, type Line, type Script, type Section, type TrackMeta } from '@/lib/types';
+import { PATTERN_LABEL, type Line, type Section, type TrackMeta } from '@/lib/types';
 
 export default function ReviewPage() {
   return (

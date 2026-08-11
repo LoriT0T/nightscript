@@ -267,12 +267,10 @@ function GoalForm({
  * spend anything. Local copies leave NIGHTSCRIPT_ACCESS_CODE unset and never see this.
  */
 function AccessStep() {
-  const [code, setCode] = useState('');
+  // Lazy initial state rather than an effect: localStorage is only touched on the first
+  // client render, which is exactly when this component first exists.
+  const [code, setCode] = useState(() => (typeof window === 'undefined' ? '' : getAccessCode()));
   const [saved, setSaved] = useState(false);
-
-  useEffect(() => {
-    setCode(getAccessCode());
-  }, []);
 
   return (
     <div className="mb-8">

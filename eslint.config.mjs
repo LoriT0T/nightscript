@@ -12,6 +12,10 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Netlify's build output and our generated audio are not source.
+    ".netlify/**",
+    ".cache/**",
+    "public/auditions/**",
   ]),
 ]);
 
