@@ -162,15 +162,40 @@ No streaks, no badges, no reminders, no notifications, no social features, nothi
 a night you did not use it into a failure. It runs at bedtime for someone trying to sleep, and
 every retention mechanic is a reason to be awake.
 
+## Measured
+
+A real 60-minute track, generated on the hosted app from a three-goal intake (2026-08-11):
+
+| | measured | target |
+|---|---|---|
+| duration | **60:00** | 60:00 |
+| integrated loudness | **−23.00 LUFS** | −23 |
+| true peak | **−6.35 dBTP** | under −3 |
+| loudest minute after minute 4 | **−6.35 dB** vs opening's −6.40 dB | never above the opening |
+| per-minute peak curve | −6.9 → −15.9 dB across the hour | descending |
+| file size | **14.4 MB** MP3 | under 30 MB |
+| spoken chunks | 22, RMS spread σ = 2.33 dB | — |
+| speaking rate | 96.4 wpm mean across chunks | ~86 assumed |
+| wall clock | ~5 min fresh, ~3 min from cache | — |
+
 ## Known limits
 
-- **Free tier is 3 requests per minute AND about 10 requests per day** on
-  `gemini-3.1-flash-tts`. A fresh hour costs about fourteen requests, so **a 60-minute track
-  cannot be rendered from scratch on the free tier in a single day.** The pipeline detects the
-  exhausted quota before generating anything and switches the whole track to
-  `gemini-2.5-flash-preview-tts`, which has a separate bucket — but that model has the same
-  daily cap, so two fresh hours in one day needs billing enabled. Cached chunks are free and
-  unlimited. See docs/GEMINI-TTS.md §6.
+- **The host kills any serverless function at 30 seconds**, and streaming does not extend it —
+  only the time to *first* byte. Everything is shaped around this: one model round-trip per
+  request, small batches, and the browser fanning out across many of them. If you move this
+  somewhere with a longer budget, the batches can grow.
+- **Free tier is 3 requests per minute and ~10 per day** on `gemini-3.1-flash-tts`, which
+  cannot render an hour. With billing enabled this is a non-issue. Spoken chunks are cached in
+  IndexedDB by content hash, so editing one line re-spends only the chunks that line is in.
+  See docs/GEMINI-TTS.md §6.
+- **MP3, not Opus.** The brief asked for Opus in WebM/CAF with an AAC fallback. That needs
+  WebCodecs plus a container muxer, and Safari's encoder support is the exact thing the
+  fallback existed to protect against. MP3 at 32 kbps mono is 14.4 MB an hour — inside the
+  budget — and plays everywhere without a codec question. One encoder that always works beat
+  two that mostly do. `src/lib/audio/mp3.ts` is the only file that would change.
+- **The de-esser is a fixed high shelf**, not a dynamic de-esser, because Web Audio has no
+  de-esser node. It removes the same sibilant band but takes a little air out of everything
+  else.
 - **The style preamble is content-filtered.** Wording that describes the listener's sleep state
   reads as hypnotic induction and returns HTTP 400. See docs/GEMINI-TTS.md §7 before editing it.
 - **The bed is synthesized, not recorded.** "Rain" is band-limited noise shaped to sit where
