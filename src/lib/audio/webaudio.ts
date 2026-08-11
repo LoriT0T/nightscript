@@ -265,12 +265,18 @@ export function analyse(
 }
 
 export function isMonotonicAfter(series: number[], fromMinute = 4, toleranceDb = 0.5): boolean {
-  let runningMax = -Infinity;
-  for (let i = fromMinute; i < series.length; i++) {
+  // The ceiling is the loudest minute of the opening, which is exactly what the enforcement
+  // pass caps against. Starting the running maximum at `series[fromMinute]` alone would
+  // measure something the pipeline never promised, and would fail whenever minute four
+  // happened to be quieter than minute two.
+  const opening = series.slice(0, fromMinute + 1).filter(Number.isFinite);
+  if (opening.length === 0) return true;
+  let ceiling = Math.max(...opening);
+  for (let i = fromMinute + 1; i < series.length; i++) {
     const cur = series[i];
     if (!Number.isFinite(cur)) continue;
-    if (runningMax !== -Infinity && cur > runningMax + toleranceDb) return false;
-    runningMax = Math.max(runningMax, cur);
+    if (cur > ceiling + toleranceDb) return false;
+    ceiling = Math.max(ceiling, cur);
   }
   return true;
 }
