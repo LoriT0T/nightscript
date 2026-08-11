@@ -203,14 +203,13 @@ A real 60-minute track, generated on the hosted app from a three-goal intake (20
 
 ## Known limits
 
-- **The host kills any serverless function at 30 seconds**, and streaming does not extend it —
-  only the time to *first* byte. Everything is shaped around this: one model round-trip per
-  request, small batches, and the browser fanning out across many of them. If you move this
-  somewhere with a longer budget, the batches can grow.
-- **Free tier is 3 requests per minute and ~10 per day** on `gemini-3.1-flash-tts`, which
-  cannot render an hour. With billing enabled this is a non-issue. Spoken chunks are cached in
+- **There is a hard daily TTS cap even with billing on: 100 requests per model per day.** A
+  60-minute track costs ~20, so about four fresh hours a day. The free tier is far tighter (3
+  per minute, ~10 per day) and cannot render an hour at all. Spoken chunks are cached in
   IndexedDB by content hash, so editing one line re-spends only the chunks that line is in.
   See docs/GEMINI-TTS.md §6.
+- **Chunk size is a cache key.** Changing `CHUNK_TARGET_WORDS` invalidates every previously
+  generated chunk. Against a 100-per-day cap that is the expensive kind of tidying.
 - **MP3, not Opus.** The brief asked for Opus in WebM/CAF with an AAC fallback. That needs
   WebCodecs plus a container muxer, and Safari's encoder support is the exact thing the
   fallback existed to protect against. MP3 at 32 kbps mono is 14.4 MB an hour — inside the

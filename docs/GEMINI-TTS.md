@@ -183,10 +183,52 @@ and is not used.
 Also ✅ VERIFIED: `gemini-3.1-pro-preview` has a free-tier quota of **literally 0** requests
 (`limit: 0`), so script writing uses `gemini-3.6-flash`, which works.
 
-Consequence for a 60-minute track: ~14 requests at 3 RPM, so a full hour costs **~7–10 minutes of
-wall clock**, spent almost entirely waiting on the rate limiter. This is why chunk caching by
-content hash (§7) matters so much: an edit to one line must not re-spend the whole hour, and on
-a 10-per-day cap it must not re-spend the whole day either.
+✅ VERIFIED **On the PAID tier there is still a hard daily cap, and it is per model:**
+
+```
+Quota exceeded for metric:
+generativelanguage.googleapis.com/generate_requests_per_model_per_day,
+limit: 100, model: gemini-3.1-flash-tts
+Please retry in 5h46m13s.
+```
+
+**100 TTS requests per day per model**, with billing enabled. A 60-minute track costs ~20–22
+requests, so roughly four fresh hours a day — and the cap is the reason chunk caching is not a
+nicety. It is also why `CHUNK_TARGET_WORDS` is left where it is: chunk text is the cache key,
+so changing it silently invalidates every second of already-generated speech.
+
+The reported `retry in` is honoured by the retry logic, so a run that hits the cap waits rather
+than failing outright — but nothing will move for hours, so the app surfaces the message.
+
+## 6a. CORS — what a browser is allowed to send
+
+✅ VERIFIED 2026-08-11, from a real browser on `https://lorit0t.github.io`.
+
+The app is now static and calls this API directly from the page, so its CORS policy is
+load-bearing. Preflight from a `github.io` origin:
+
+```
+access-control-allow-origin: https://lorit0t.github.io
+access-control-allow-methods: DELETE,GET,HEAD,OPTIONS,PATCH,POST,PUT
+access-control-allow-headers: content-type,x-goog-api-key
+access-control-max-age: 3600
+```
+
+Two consequences:
+
+1. **Browser calls are permitted.** A live `fetch` from that origin returns an HTTP status
+   (400 for a bad key) rather than a network error, which is the proof that CORS is not in
+   the way.
+2. **Only `content-type` and `x-goog-api-key` may be sent.** A preflight that additionally
+   asked for `api-revision` returned **403**. Since §2 records `Api-Revision: 2026-05-20` as
+   required for streaming, this looked like it ruled out static hosting entirely.
+   ✅ It does not: **both the streaming and non-streaming endpoints work with the header
+   omitted.** Adding any custom header here will break the app in the browser while
+   continuing to work from the CLI — re-run a preflight before adding one.
+
+Consequence for a 60-minute track: ~20 requests, so a full hour costs a few minutes of wall
+clock. Chunk caching by content hash (§7) is what keeps an edit to one line from re-spending
+the whole hour — and, against a 100-per-day cap, most of the day.
 
 ## 7. Prompting, tags, and chunking
 
