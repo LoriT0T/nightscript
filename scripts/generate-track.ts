@@ -3,9 +3,9 @@
  * pipeline; this exists so an hour-long generation can be driven, measured and re-run
  * without holding a browser tab open for it.
  *
- *   GEMINI_API_KEY=... npx tsx scripts/generate-track.ts intake.json [--minutes 60]
+ *   GEMINI_API_KEY=... npx tsx scripts/generate-track.ts artifacts/intake.json [--minutes 60]
  *       [--voice Sulafat] [--bed pink|brown|rain|none] [--script script.json]
- *       [--out out/track] [--script-only]
+ *       [--out artifacts/track] [--script-only]
  *
  * Everything is cached by content hash, so a re-run after editing one line only
  * regenerates the chunks that line touched.
@@ -40,7 +40,8 @@ async function main() {
     bedLevelDb: Number(arg('bed-db', '-34')),
     minutes,
   };
-  const outBase = arg('out', join('out', 'track'))!;
+  // NOT `out/` — that is Next's static-export directory and `next build` empties it.
+  const outBase = arg('out', join('artifacts', 'track'))!;
   await mkdir(dirname(outBase), { recursive: true });
 
   // ---- script -------------------------------------------------------------

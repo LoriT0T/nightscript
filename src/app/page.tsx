@@ -13,6 +13,7 @@ import {
   type Draft,
 } from '@/lib/db';
 import { formatDuration } from '@/lib/script/plan';
+import { EXAMPLES } from '@/lib/examples';
 import type { TrackMeta } from '@/lib/types';
 
 /**
@@ -72,15 +73,41 @@ export default function Library() {
       {tracks === null && !storageError && <p className="text-sm text-ink-500">Loading…</p>}
 
       {tracks && tracks.length === 0 && drafts.length === 0 && (
-        <p className="text-sm leading-relaxed text-ink-500">
-          Nothing here yet. A track takes about ten minutes to make and then plays free
-          forever — it lives on this device, not on a server.
+        <p className="mb-10 text-sm leading-relaxed text-ink-500">
+          You have not made one yet. A track takes a few minutes to make and then plays free
+          forever — it lives on this device, not on a server. There are finished ones below to
+          listen to first.
         </p>
+      )}
+
+      {EXAMPLES.length > 0 && (
+        <section className="mb-10">
+          <h2 className="mb-3 text-xs uppercase tracking-widest text-ink-600">Finished tracks</h2>
+          <p className="mb-3 text-xs leading-relaxed text-ink-500">
+            Made with this app, ready to play. Nothing to generate and no key needed.
+          </p>
+          <ul className="space-y-2">
+            {EXAMPLES.map((e) => (
+              <li key={e.id} className="rounded-xl border border-ink-800 bg-ink-900/40 p-4">
+                <Link href={`/play?ex=${e.id}`} className="block">
+                  <p className="text-sm text-ink-100">{e.name}</p>
+                  <p className="mt-1 text-xs text-ink-500">
+                    {formatDuration(e.durationSec)} · {(e.bytes / 1e6).toFixed(1)} MB · {e.voice}
+                  </p>
+                  <p className="mt-1 text-xs leading-relaxed text-ink-600">{e.goals.join(' · ')}</p>
+                  <p className="mt-1 text-xs tabular-nums text-ink-600">
+                    {e.lufs.toFixed(1)} LUFS · peak {e.truePeakDb.toFixed(1)} dBTP
+                  </p>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </section>
       )}
 
       {tracks && tracks.length > 0 && (
         <section className="mb-10">
-          <h2 className="mb-3 text-xs uppercase tracking-widest text-ink-600">Tracks</h2>
+          <h2 className="mb-3 text-xs uppercase tracking-widest text-ink-600">Your tracks</h2>
           <ul className="space-y-2">
             {tracks.map((t) => (
               <li key={t.id} className="rounded-xl border border-ink-800 bg-ink-900/40 p-4">

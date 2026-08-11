@@ -1,9 +1,15 @@
 'use client';
 
-import { authHeaders } from '@/lib/access';
 import { getCachedChunk, putCachedChunk } from '@/lib/db';
+import { generateText, speakChunk as speakChunkDirect } from '@/lib/gemini/browser';
+import {
+  acceptRepair,
+  buildRepairPrompt,
+  buildSectionPrompt,
+  parseScriptJson,
+  sectionLineTarget,
+} from '@/lib/gemini/script';
 import { validateScript } from '@/lib/affirmations/validator';
-import { sectionLineTarget } from '@/lib/gemini/script';
 import { buildTimeline, planChunks, timelineDurationSec } from '@/lib/script/plan';
 import { assembleInBrowser, type ChunkPcm } from '@/lib/audio/webaudio';
 import { encodeMp3 } from '@/lib/audio/mp3';
@@ -14,16 +20,15 @@ import type {
   Script,
   Section,
   TrackSettings,
-  ValidationIssue,
 } from '@/lib/types';
 
 /**
- * Client-side generation.
+ * Generation, entirely in the browser.
  *
- * The browser owns the whole pipeline and the server is two stateless proxies that hold the
- * API key. That is what makes this hostable — no serverless function has to live longer than
- * a single chunk — and it is also what makes the local-first promise true rather than
- * aspirational: the script and the finished hour never land on a disk we control.
+ * There is no server at all: the app is static files, and the browser talks to Google
+ * directly with the listener's own key. That makes the local-first claim literal — the
+ * script and the finished hour never touch a machine we control — and it removes the
+ * function time limits that shaped the earlier proxied design.
  */
 
 export interface GenerateProgress {
@@ -62,67 +67,29 @@ async function chunkKey(section: string, text: string, voice: string): Promise<s
 /**
  * Speak one chunk, retrying transient failures.
  *
- * 502s happen: the platform kills a function that runs long, and a chunk that streams back
- * comfortably on its own can tip over the edge when three are in flight. One bad chunk must
- * not lose an hour of work, so each is retried with backoff before giving up.
+ * Rate limits and the occasional dropped stream are normal, and one bad passage must not
+ * lose a whole track, so each is retried with backoff before giving up.
  */
 async function speakChunk(
-  section: string,
+  section: Section,
   text: string,
   voice: string,
   signal?: AbortSignal,
   attempt = 0,
 ): Promise<Int16Array> {
-  const res = await fetch('/api/tts', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...authHeaders() },
-    body: JSON.stringify({ section, text, voice }),
-    signal,
-  });
-  if (!res.ok) {
-    const transient = res.status >= 500 || res.status === 429;
-    if (transient && attempt < 3) {
-      await new Promise((r) => setTimeout(r, 1500 * 2 ** attempt));
-      return speakChunk(section, text, voice, signal, attempt + 1);
-    }
-    let message = `Speech request failed (${res.status})`;
-    try {
-      message = ((await res.json()) as { error?: string }).error ?? message;
-    } catch {
-      /* keep generic */
-    }
-    throw new Error(message);
+  try {
+    return await speakChunkDirect(section, text, voice, { signal });
+  } catch (e) {
+    const message = (e as Error).message ?? '';
+    const permanent =
+      /API key|api_key|not set|PERMISSION|content_blocked|policy/i.test(message) || attempt >= 3;
+    if (permanent) throw e;
+    // Honour the API's own retry hint when it gives one.
+    const hinted = /retry in ([0-9.]+)s/i.exec(message);
+    const waitMs = hinted ? (Number(hinted[1]) + 1) * 1000 : 1500 * 2 ** attempt;
+    await new Promise((r) => setTimeout(r, waitMs));
+    return speakChunk(section, text, voice, signal, attempt + 1);
   }
-
-  // Raw PCM arrives as a stream; collect it without assuming a length up front.
-  const reader = res.body!.getReader();
-  const parts: Uint8Array[] = [];
-  let total = 0;
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    parts.push(value);
-    total += value.length;
-  }
-
-  const bytes = new Uint8Array(total);
-  let o = 0;
-  for (const p of parts) {
-    bytes.set(p, o);
-    o += p.length;
-  }
-  if (total < 2) {
-    // An empty body from a stream that closed early is the same class of failure as a 502.
-    if (attempt < 3) {
-      await new Promise((r) => setTimeout(r, 1500 * 2 ** attempt));
-      return speakChunk(section, text, voice, signal, attempt + 1);
-    }
-    throw new Error('The voice model returned no audio for a chunk.');
-  }
-
-  // Byte offset must be even and the buffer length a multiple of 2 for Int16Array.
-  const usable = total - (total % 2);
-  return new Int16Array(bytes.buffer, 0, usable / 2);
 }
 
 export async function generateTrack(
@@ -202,21 +169,13 @@ export async function generateTrack(
 }
 
 /**
- * Write the script by asking for all five sections at once.
- *
- * Parallel rather than sequential because each section is an independent prompt, and because
- * a single whole-script call exceeds the host's function limit (see the route). The sections
- * come back in whatever order they finish and are reassembled into arc order here.
- */
-/**
  * The request plan, built for the requested length.
  *
- * Two constraints shape this. The host kills any function at 30 seconds and latency scales
- * with how many lines are asked for, so a section is split across several small batches that
- * all run at once — measured, a 20-line batch died at 30.7 s while a 12-15 line batch returns
- * in 10-20 s. And the totals have to track the target duration: hardcoding them gave a
- * 10-minute track the same 146 lines as an hour, which overran by 2:14 with the pauses
- * already at their floor.
+ * Sections are written as several small batches running in parallel. That started as a way
+ * to survive a 30-second serverless ceiling; it stays because it is simply faster than one
+ * long call and gives each batch a distinct emphasis. The totals track the target duration —
+ * hardcoding them once gave a 10-minute track the same 146 lines as an hour, which overran
+ * by 2:14 with the pauses already at their floor.
  */
 const SECTION_BATCHES: Array<{ section: Section; notes: string[] }> = [
   {
@@ -292,6 +251,7 @@ export async function writeScript(
   intake: Intake,
   minutes: number,
   onProgress: (message: string) => void,
+  signal?: AbortSignal,
 ): Promise<Script> {
   let done = 0;
   const requests = planScriptRequests(minutes);
@@ -299,24 +259,14 @@ export async function writeScript(
 
   const batches = await Promise.all(
     requests.map(async (request) => {
-      const res = await fetch('/api/script', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...authHeaders() },
-        body: JSON.stringify({ intake, minutes, ...request }),
-      });
-      if (!res.ok) {
-        let message = `Script request failed (${res.status})`;
-        try {
-          message = ((await res.json()) as { error?: string }).error ?? message;
-        } catch {
-          /* keep generic */
-        }
-        throw new Error(`${request.section}: ${message}`);
-      }
-      const json = (await res.json()) as { lines: Line[]; issues: ValidationIssue[] };
+      const raw = await generateText(
+        buildSectionPrompt(intake, minutes, request.section, request.lineCount, request.variantNote),
+        signal,
+      );
+      const lines = parseScriptJson(raw, intake.goals).map((l) => ({ ...l, section: request.section }));
       done++;
       onProgress(`Writing the script — ${done} of ${requests.length} passes`);
-      return { section: request.section, lines: json.lines ?? [] };
+      return { section: request.section, lines };
     }),
   );
 
@@ -344,17 +294,16 @@ export async function writeScript(
       targets.map(async (lineId) => {
         const line = lines.find((l) => l.id === lineId);
         if (!line) return;
-        const res = await fetch('/api/script', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', ...authHeaders() },
-          body: JSON.stringify({
-            intake,
-            repair: { line, problems: problems.get(lineId) ?? [] },
-          }),
-        });
-        if (!res.ok) return;
-        const json = (await res.json()) as { line: Line | null };
-        if (json.line) fixes.set(lineId, json.line);
+        try {
+          const raw = await generateText(
+            buildRepairPrompt(intake, line, problems.get(lineId) ?? []),
+            signal,
+          );
+          const fixed = acceptRepair(intake, line, raw);
+          if (fixed) fixes.set(lineId, fixed);
+        } catch {
+          // Leave it broken; the drop below is the backstop.
+        }
       }),
     );
     lines = lines.map((l) => fixes.get(l.id) ?? l);

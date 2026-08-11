@@ -20,9 +20,32 @@ Two documents carry the reasoning and should be read before changing anything:
 
 ## Live
 
-**<https://nightscript-app.netlify.app>** — hosted on Netlify. It asks for an access code
-before it will generate anything, because the deployment runs on a billed API key and a public
-URL without a gate is a machine that spends someone else's money on request.
+**<https://lorit0t.github.io/nightscript/>** — static, on GitHub Pages.
+
+There is no server. The app is files on a CDN, and your browser calls Google's API directly
+with **your own key**, which you paste once and which is stored in that browser's
+localStorage. It is not in this repository, not in the page source, and not on any machine of
+ours — there isn't one. Get a key at <https://aistudio.google.com/apikey>.
+
+That was not a stylistic choice. GitHub Pages cannot run server code, so a shared key had
+nowhere to live; bring-your-own-key is the only honest way to host this for free. It turned
+out to be better anyway — losing the serverless proxy also lost its 30-second function
+ceiling, which had been shaping the whole design.
+
+Two things had to be true for it to work at all, both verified against the live API before
+any of it was written:
+
+- **CORS is allowed** from a `github.io` origin — preflight returns 200 with the origin echoed.
+- **Only `content-type` and `x-goog-api-key` may be sent.** A preflight that also asked for
+  `api-revision` returned **403**. Since the docs call `Api-Revision: 2026-05-20` required for
+  streaming, this looked fatal — it is not. Both the streaming and non-streaming endpoints
+  work without it.
+
+### Finished tracks
+
+The app ships with real finished tracks you can play without a key and without generating
+anything. They are genuine output — real intake, real voice, real pipeline — with the numbers
+each one measured.
 
 ---
 

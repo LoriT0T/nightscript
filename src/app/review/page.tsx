@@ -3,10 +3,11 @@
 import { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Button, Note, Shell } from '@/components/ui';
-import { authHeaders } from '@/lib/access';
 import { getDraft, openDatabase, saveDraft, saveTrack, newId, type Draft } from '@/lib/db';
 import { generateTrack, writeScript as writeScriptApi, type GenerateProgress } from '@/lib/generate';
 import { validateScript } from '@/lib/affirmations/validator';
+import { generateText } from '@/lib/gemini/browser';
+import { acceptRepair, buildRepairPrompt } from '@/lib/gemini/script';
 import { ARC, estimateRuntimeSec, formatDuration } from '@/lib/script/plan';
 import { PATTERN_LABEL, type Line, type Section, type TrackMeta } from '@/lib/types';
 
@@ -149,9 +150,9 @@ function Review() {
             />
           </div>
           <Note>
-            Keep this tab open and awake — the whole hour is built here on your device, so
-            nothing about it is sent anywhere or stored on a server. An hour takes a few
-            minutes: most of it is the voice, then assembly and encoding.
+            Keep this tab open and awake. Everything happens on this device — the words go
+            straight from your browser to Google and back, and the hour is assembled here.
+            Nothing is stored on any server. An hour takes a few minutes.
           </Note>
           {error && <p className="text-sm text-alert-400">{error}</p>}
         </div>
@@ -217,19 +218,14 @@ function Review() {
                         )
                       }
                       onRegenerate={async () => {
-                        const res = await fetch('/api/line', {
-                          method: 'POST',
-                          headers: { 'Content-Type': 'application/json', ...authHeaders() },
-                          body: JSON.stringify({
-                            line,
-                            goal: draft.intake.goals.find((g) => g.id === line.goalId),
-                          }),
-                        });
-                        const json = await res.json();
-                        if (json.line) {
+                        const raw = await generateText(
+                          buildRepairPrompt(draft.intake, line, ['give a different wording']),
+                        );
+                        const fixed = acceptRepair(draft.intake, line, raw);
+                        if (fixed) {
                           await mutate(
                             draft.script!.lines.map((l) =>
-                              l.id === line.id ? { ...l, text: json.line.text } : l,
+                              l.id === line.id ? { ...l, text: fixed.text } : l,
                             ),
                           );
                         }

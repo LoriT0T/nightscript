@@ -184,17 +184,22 @@ export interface Chunk {
 }
 
 /**
- * Chunk size is chosen for two reasons, neither of them the token limit — we are two orders
- * of magnitude inside the context window either way.
+ * Chunk size. Not driven by the token limit — we are two orders of magnitude inside the
+ * context window either way.
  *
- * 1. Prosody. Longer chunks let the model accelerate and brighten toward the end, which is
- *    the one thing the arc cannot tolerate.
- * 2. The host's 30-second function ceiling. A 152-word chunk streams back in ~14 s when it
- *    has the machine to itself, but three of those in flight at once is enough to push one
- *    over the edge and 502 the whole generation. Halving the target buys the margin; the
- *    extra requests are cheap and run in parallel anyway.
+ * These were halved from 150/220 to survive a serverless host's 30-second function ceiling.
+ * The browser now calls the API directly and that ceiling is gone, so bigger chunks are
+ * available again — but they are deliberately NOT taken, for two reasons:
  *
- * See docs/GEMINI-TTS.md §7.
+ *  1. These values produced the measured 60-minute track (-23.00 LUFS, descent holding), so
+ *     they are the known-good configuration. Larger chunks are a theoretical prosody gain
+ *     against a proven result.
+ *  2. Chunk text is the cache key. Changing these silently invalidates every chunk of
+ *     already-generated speech, which at a hard 100 TTS requests per day is expensive in the
+ *     one currency that actually runs out.
+ *
+ * Raise them if seam drift ever becomes audible, and expect to re-generate. See
+ * docs/GEMINI-TTS.md §7.
  */
 export const CHUNK_TARGET_WORDS = 80;
 export const CHUNK_MAX_WORDS = 120;

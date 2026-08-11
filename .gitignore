@@ -48,3 +48,6 @@ next-env.d.ts
 # Local Netlify folder
 .netlify
 public/_scale.json
+
+# CLI render outputs (audio, scripts)
+/artifacts

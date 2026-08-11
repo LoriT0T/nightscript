@@ -1,9 +1,10 @@
 'use client';
 
-import { Suspense, useCallback, useEffect, useRef, useState } from 'react';
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { getAudio, getTrack } from '@/lib/db';
+import { exampleUrl, findExample } from '@/lib/examples';
 import { formatDuration } from '@/lib/script/plan';
 import type { TrackMeta } from '@/lib/types';
 
@@ -32,10 +33,35 @@ export default function PlayerPage() {
 const TIMERS = [0, 15, 30, 45, 60] as const;
 
 function Player() {
-  const trackId = useSearchParams().get('t');
+  const params = useSearchParams();
+  const trackId = params.get('t');
+  const exampleId = params.get('ex');
   const audioRef = useRef<HTMLAudioElement | null>(null);
-  const [meta, setMeta] = useState<TrackMeta | null>(null);
-  const [url, setUrl] = useState<string | null>(null);
+  // A shipped example is known synchronously from the URL, so it is derived during render
+  // rather than pushed in from an effect.
+  const example = exampleId ? findExample(exampleId) : undefined;
+  const [storedMeta, setMeta] = useState<TrackMeta | null>(null);
+  const [storedUrl, setUrl] = useState<string | null>(null);
+
+  // Memoised so the object identity is stable — an effect below depends on `meta`, and a
+  // fresh object every render would restart the Media Session on every tick. `Date.parse`
+  // of a fixed string is pure; the `Date.now()` fallback is not, so it is not used here.
+  const exampleMeta = useMemo<TrackMeta | null>(
+    () =>
+      example
+        ? ({
+            id: example.id,
+            name: example.name,
+            createdAt: Date.parse(example.madeAt) || 0,
+            durationSec: example.durationSec,
+            bytes: example.bytes,
+            mime: example.mime,
+          } as TrackMeta)
+        : null,
+    [example],
+  );
+  const meta: TrackMeta | null = exampleMeta ?? storedMeta;
+  const url = example ? exampleUrl(example) : storedUrl;
   const [playing, setPlaying] = useState(false);
   const [position, setPosition] = useState(0);
   const [duration, setDuration] = useState(0);
@@ -46,7 +72,10 @@ function Player() {
   const idleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
-    if (!trackId) return;
+    // A shipped example streams from its own URL (handled above); a generated track comes
+    // out of IndexedDB as a blob. Everything downstream — controls, timer, lock screen — is
+    // identical either way.
+    if (exampleId || !trackId) return;
     let revoke: string | null = null;
     (async () => {
       const [m, blob] = await Promise.all([getTrack(trackId), getAudio(trackId)]);
@@ -59,7 +88,7 @@ function Player() {
     return () => {
       if (revoke) URL.revokeObjectURL(revoke);
     };
-  }, [trackId]);
+  }, [trackId, exampleId]);
 
   // Dim to black after ten seconds of no touching, and stay there.
   const wake = useCallback(() => {
@@ -141,7 +170,7 @@ function Player() {
     }
   }
 
-  if (!trackId) return <Empty />;
+  if (!trackId && !exampleId) return <Empty />;
 
   return (
     <div className="flex min-h-dvh flex-col bg-ink-950" onClick={wake}>

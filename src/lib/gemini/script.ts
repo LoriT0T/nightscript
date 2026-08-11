@@ -246,14 +246,13 @@ export async function generateSectionLines(
   return parseScriptJson(raw, intake.goals).map((l) => ({ ...l, section }));
 }
 
-/** Rewrite one line that failed validation. Used by the client and by the CLI. */
-export async function repairLine(
-  intake: Intake,
-  line: Line,
-  problems: string[],
-): Promise<Line | null> {
+/**
+ * Prompt for rewriting one line that failed validation. Pure, so the browser and the CLI
+ * build exactly the same instruction.
+ */
+export function buildRepairPrompt(intake: Intake, line: Line, problems: string[]): string {
   const goal = intake.goals.find((g) => g.id === line.goalId);
-  const prompt = `Rewrite this line of a sleep affirmation script so it keeps its meaning and its
+  return `Rewrite this line of a sleep affirmation script so it keeps its meaning and its
 pattern while fixing the stated problem.
 
 Line: "${line.text}"
@@ -268,14 +267,33 @@ marks, no mystical or wealth framing. Short sentence, falling at the end. If the
 "intention" it must contain a concrete "when …" cue.
 
 Return ONLY JSON: {"lines":[{"text":"…","pattern":"${line.pattern}","section":"${line.section}","goalId":${goal ? `"${goal.id}"` : 'null'}}]}`;
+}
 
+/**
+ * Accept a repaired line only if it now passes. A rewrite that swapped one violation for
+ * another must not ship just because the model returned something.
+ */
+export function acceptRepair(intake: Intake, line: Line, raw: string): Line | null {
   try {
-    const parsed = parseScriptJson(await generateOnce(prompt), intake.goals);
+    const parsed = parseScriptJson(raw, intake.goals);
     if (!parsed.length) return null;
     const candidate: Line = { ...line, text: parsed[0].text };
     return validateScript([candidate], intake.goals).some((i) => i.severity === 'error')
       ? null
       : candidate;
+  } catch {
+    return null;
+  }
+}
+
+/** Rewrite one line that failed validation. CLI path. */
+export async function repairLine(
+  intake: Intake,
+  line: Line,
+  problems: string[],
+): Promise<Line | null> {
+  try {
+    return acceptRepair(intake, line, await generateOnce(buildRepairPrompt(intake, line, problems)));
   } catch {
     return null;
   }

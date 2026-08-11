@@ -6,7 +6,8 @@ import Link from 'next/link';
 import { Button, Field, Note, Shell, Slider, TextArea } from '@/components/ui';
 import { newId, saveDraft } from '@/lib/db';
 import { AUDITION_VOICES, DEFAULT_VOICE } from '@/lib/voices';
-import { getAccessCode, setAccessCode } from '@/lib/access';
+import { getApiKey, setApiKey, testApiKey } from '@/lib/gemini/browser';
+import { asset } from '@/lib/paths';
 import type { Goal, Intake, TrackSettings } from '@/lib/types';
 
 /**
@@ -100,7 +101,7 @@ export default function NewTrackPage() {
 
       {step === 1 && <VoiceStep settings={settings} onChange={setSettings} />}
 
-      {step === 2 && <AccessStep />}
+      {step === 2 && <ApiKeyStep />}
 
       {step === 2 && (
         <div className="space-y-6">
@@ -263,36 +264,73 @@ function GoalForm({
 }
 
 /**
- * The hosted copy runs on a billed API key, so it asks for a shared code before it will
- * spend anything. Local copies leave NIGHTSCRIPT_ACCESS_CODE unset and never see this.
+ * Your own API key, kept on your own device.
+ *
+ * The app is static files with no server, so there is nowhere for a shared key to live and
+ * nothing to proxy through. The browser calls Google directly with this key. It is written
+ * to this browser's localStorage and sent to exactly one place: Google's API. It is not in
+ * the page source, not in the repository, and not on any server of ours — there is no server.
  */
-function AccessStep() {
+function ApiKeyStep() {
   // Lazy initial state rather than an effect: localStorage is only touched on the first
   // client render, which is exactly when this component first exists.
-  const [code, setCode] = useState(() => (typeof window === 'undefined' ? '' : getAccessCode()));
-  const [saved, setSaved] = useState(false);
+  const [key, setKey] = useState(() => (typeof window === 'undefined' ? '' : getApiKey()));
+  const [state, setState] = useState<'idle' | 'checking' | 'ok' | 'bad'>('idle');
+  const [message, setMessage] = useState('');
+
+  async function check() {
+    if (!key.trim()) return;
+    setApiKey(key);
+    setState('checking');
+    const res = await testApiKey(key);
+    if (res.ok) {
+      setState('ok');
+      setMessage('');
+    } else {
+      setState('bad');
+      setMessage(res.message);
+    }
+  }
 
   return (
     <div className="mb-8">
       <Field
-        label="Access code"
-        hint="This copy is hosted on a paid key, so it asks for a code before generating. Stored in this browser only; you enter it once."
+        label="Your Gemini API key"
+        hint="Stored in this browser only. It goes straight to Google and nowhere else — this app has no server to send it to."
       >
         <input
           type="password"
-          value={code}
+          value={key}
+          autoComplete="off"
+          spellCheck={false}
+          placeholder="AI…"
           onChange={(e) => {
-            setCode(e.target.value);
-            setSaved(false);
+            setKey(e.target.value);
+            setState('idle');
           }}
-          onBlur={() => {
-            setAccessCode(code);
-            setSaved(true);
-          }}
-          className="w-full rounded-lg border border-ink-700 bg-ink-900 px-3 py-2 text-sm text-ink-100 focus:border-ink-500 focus:outline-none"
+          onBlur={check}
+          className="w-full rounded-lg border border-ink-700 bg-ink-900 px-3 py-2 text-sm text-ink-100 placeholder:text-ink-600 focus:border-ink-500 focus:outline-none"
         />
       </Field>
-      {saved && <p className="mt-2 text-xs text-ink-500">Saved on this device.</p>}
+      <div className="mt-2 text-xs">
+        {state === 'checking' && <span className="text-ink-500">Checking…</span>}
+        {state === 'ok' && <span className="text-ink-400">Key works. Saved on this device.</span>}
+        {state === 'bad' && <span className="text-warm-300">{message}</span>}
+        {state === 'idle' && (
+          <span className="text-ink-500">
+            Get one free at{' '}
+            <a
+              href="https://aistudio.google.com/apikey"
+              target="_blank"
+              rel="noreferrer"
+              className="underline decoration-ink-600 hover:text-ink-300"
+            >
+              aistudio.google.com/apikey
+            </a>
+            .
+          </span>
+        )}
+      </div>
     </div>
   );
 }
@@ -308,14 +346,14 @@ function VoiceStep({
   const [playing, setPlaying] = useState<string | null>(null);
 
   useEffect(() => {
-    fetch('/auditions/index.json')
+    fetch(asset('/auditions/index.json'))
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => setAvailable(d ? d.voices.map((v: { voice: string }) => v.voice) : []))
       .catch(() => setAvailable([]));
   }, []);
 
   function audition(name: string) {
-    const el = new Audio(`/auditions/${name}.m4a`);
+    const el = new Audio(asset(`/auditions/${name}.m4a`));
     setPlaying(name);
     el.onended = () => setPlaying(null);
     el.play().catch(() => setPlaying(null));

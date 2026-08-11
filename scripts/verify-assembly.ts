@@ -68,7 +68,7 @@ async function main() {
   const workDir = join(process.cwd(), '.cache', 'verify');
   await mkdir(workDir, { recursive: true });
 
-  const script = JSON.parse(await readFile('out/track.script.json', 'utf8')) as Script;
+  const script = JSON.parse(await readFile('artifacts/track.script.json', 'utf8')) as Script;
   const chunks = planChunks(script);
   chunks.forEach((c, i) => (c.hashKey = `verify${i}`));
   const { plays, coreCycles } = buildTimeline(chunks, minutes);
@@ -93,7 +93,7 @@ async function main() {
   const t0 = Date.now();
   const res = await assembleTrack(plays, audio, {
     workDir,
-    outBase: join('out', 'verify'),
+    outBase: join('artifacts', 'verify'),
     settings,
     onProgress: (m) => process.stdout.write(`\r  ${m.padEnd(60)}`),
   });
@@ -131,8 +131,8 @@ async function main() {
  peak curve          ${m.minutePeakDb.map((v) => (Number.isFinite(v) ? v.toFixed(0) : '-')).join(' ')}
  monotonic after 4m  ${m.monotonicAfterMin4 ? 'YES' : 'NO'}${rises.length ? `\n   rises: ${rises.join(', ')}` : ''}
 
- files               out/verify.webm
-                     out/verify.m4a
+ files               artifacts/verify.webm
+                     artifacts/verify.m4a
 ═══════════════════════════════════════`);
 
   // Section boundaries actually achieved, against the brief's layout.
@@ -155,7 +155,7 @@ async function main() {
     );
   }
 
-  await writeFile('out/verify.measurement.json', JSON.stringify(m, null, 2));
+  await writeFile('artifacts/verify.measurement.json', JSON.stringify(m, null, 2));
 }
 
 main().catch((e) => {
