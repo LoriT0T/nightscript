@@ -39,3 +39,8 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# generated audio, caches, and anything produced by a run
+/.cache
+/out
+/public/auditions

@@ -1,0 +1,17 @@
+[build]
+  command = "npm run build"
+  publish = ".next"
+
+[build.environment]
+  NODE_VERSION = "22"
+
+# The TTS route streams for ~15 s per chunk and the script writer for ~60 s. Both send
+# their first byte in well under a second, which is what the platform limit applies to,
+# but the ceiling still has to be raised above the 10 s default.
+[functions]
+  included_files = []
+
+[[headers]]
+  for = "/api/*"
+  [headers.values]
+    Cache-Control = "no-store"

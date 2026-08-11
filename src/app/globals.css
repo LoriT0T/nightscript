@@ -1,26 +1,94 @@
-@import "tailwindcss";
+@import 'tailwindcss';
+
+/*
+ * One palette, dark only. There is no light theme and there is no white: this app is used
+ * in a dark bedroom by someone trying to sleep, and a white surface at 1am is a face full
+ * of light. The brightest text in the app is #a8a8b0, well under pure white.
+ */
+@theme {
+  --color-ink-950: #050506;
+  --color-ink-900: #0a0a0c;
+  --color-ink-850: #101013;
+  --color-ink-800: #16161a;
+  --color-ink-700: #1e1e24;
+  --color-ink-600: #2a2a32;
+  --color-ink-500: #3a3a44;
+  --color-ink-400: #55555f;
+  --color-ink-300: #71717c;
+  --color-ink-200: #8c8c96;
+  --color-ink-100: #a8a8b0;
+  --color-warm-400: #7a6a5e;
+  --color-warm-300: #9a8878;
+  --color-alert-400: #8a5a52;
+}
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  color-scheme: dark;
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+html,
+body {
+  background: var(--color-ink-950);
+  color: var(--color-ink-200);
+  -webkit-font-smoothing: antialiased;
+  overscroll-behavior: none;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+}
+
+::selection {
+  background: var(--color-ink-600);
+  color: var(--color-ink-100);
+}
+
+/* Focus ring that is visible without being bright. */
+:focus-visible {
+  outline: 1px solid var(--color-ink-400);
+  outline-offset: 2px;
+}
+
+input[type='range'] {
+  -webkit-appearance: none;
+  appearance: none;
+  background: transparent;
+}
+input[type='range']::-webkit-slider-runnable-track {
+  height: 2px;
+  background: var(--color-ink-600);
+  border-radius: 2px;
+}
+input[type='range']::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  height: 28px;
+  width: 28px;
+  border-radius: 50%;
+  background: var(--color-ink-400);
+  margin-top: -13px;
+}
+input[type='range']::-moz-range-track {
+  height: 2px;
+  background: var(--color-ink-600);
+}
+input[type='range']::-moz-range-thumb {
+  height: 28px;
+  width: 28px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--color-ink-400);
+}
+
+/* The player's dim-to-black. Long, so it is never perceived as an event. */
+.dimmable {
+  transition: opacity 2500ms ease-in-out;
+}
+.dimmed {
+  opacity: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dimmable {
+    transition: none;
+  }
 }

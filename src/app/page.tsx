@@ -1,69 +1,146 @@
-import Image from "next/image";
+'use client';
 
-export default function Home() {
+import { useCallback, useEffect, useState } from 'react';
+import Link from 'next/link';
+import { Button, Shell } from '@/components/ui';
+import { deleteDraft, deleteTrack, listDrafts, listTracks, storageEstimate, type Draft } from '@/lib/db';
+import { formatDuration } from '@/lib/script/plan';
+import type { TrackMeta } from '@/lib/types';
+
+/**
+ * The library. Note what is deliberately absent: no streak counter, no "you have not
+ * listened in 4 days", no badges, no reminders. This runs at bedtime for someone trying to
+ * sleep; every retention mechanic is a reason to be awake.
+ */
+export default function Library() {
+  const [tracks, setTracks] = useState<TrackMeta[] | null>(null);
+  const [drafts, setDrafts] = useState<Draft[]>([]);
+  const [storage, setStorage] = useState<{ usage: number; quota: number } | null>(null);
+
+  const refresh = useCallback(async () => {
+    const [t, d, s] = await Promise.all([listTracks(), listDrafts(), storageEstimate()]);
+    setTracks(t);
+    setDrafts(d.filter((x) => !t.some((tr) => tr.script === x.script)));
+    setStorage(s);
+  }, []);
+
+  useEffect(() => {
+    queueMicrotask(() => void refresh());
+  }, [refresh]);
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert h-5 w-[100px]"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the{" "}
-            <code className="rounded bg-black/[.06] px-1.5 py-0.5 font-mono text-[0.9em] dark:bg-white/[.08]">
-              page.tsx
-            </code>{" "}
-            file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
+    <Shell>
+      <header className="mb-10">
+        <h1 className="text-2xl font-normal tracking-wide text-ink-100">Nightscript</h1>
+        <p className="mt-2 text-sm leading-relaxed text-ink-400">
+          An hour of quiet, written for you, to fall asleep to.
+        </p>
+      </header>
+
+      <Link
+        href="/new"
+        className="mb-10 block rounded-xl border border-ink-700 bg-ink-900 px-4 py-4 text-sm text-ink-200 hover:bg-ink-850"
+      >
+        Make a new track →
+      </Link>
+
+      {tracks === null && <p className="text-sm text-ink-500">Loading…</p>}
+
+      {tracks && tracks.length === 0 && drafts.length === 0 && (
+        <p className="text-sm leading-relaxed text-ink-500">
+          Nothing here yet. A track takes about ten minutes to make and then plays free
+          forever — it lives on this device, not on a server.
+        </p>
+      )}
+
+      {tracks && tracks.length > 0 && (
+        <section className="mb-10">
+          <h2 className="mb-3 text-xs uppercase tracking-widest text-ink-600">Tracks</h2>
+          <ul className="space-y-2">
+            {tracks.map((t) => (
+              <li key={t.id} className="rounded-xl border border-ink-800 bg-ink-900/40 p-4">
+                <div className="flex items-start justify-between gap-4">
+                  <Link href={`/play?t=${t.id}`} className="min-w-0 flex-1">
+                    <p className="truncate text-sm text-ink-100">{t.name}</p>
+                    <p className="mt-1 text-xs text-ink-500">
+                      {formatDuration(t.durationSec)} · {(t.bytes / 1e6).toFixed(1)} MB ·{' '}
+                      {new Date(t.createdAt).toLocaleDateString()} · {t.settings.voice}
+                    </p>
+                    <p className="mt-1 truncate text-xs text-ink-600">
+                      {t.intake.goals.map((g) => g.text).join(' · ')}
+                    </p>
+                    {t.measured && (
+                      <p className="mt-1 text-xs tabular-nums text-ink-600">
+                        {t.measured.integratedLufs.toFixed(1)} LUFS · peak{' '}
+                        {t.measured.truePeakDb.toFixed(1)} dBTP
+                        {t.measured.monotonicAfterMin4 ? '' : ' · level rises somewhere'}
+                      </p>
+                    )}
+                  </Link>
+                  <div className="flex flex-col items-end gap-1">
+                    <Link
+                      href={`/new?from=${t.id}`}
+                      className="text-xs text-ink-500 hover:text-ink-300"
+                    >
+                      remake
+                    </Link>
+                    <button
+                      onClick={async () => {
+                        await deleteTrack(t.id);
+                        void refresh();
+                      }}
+                      className="text-xs text-ink-600 hover:text-alert-400"
+                    >
+                      delete
+                    </button>
+                  </div>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      {drafts.length > 0 && (
+        <section className="mb-10">
+          <h2 className="mb-3 text-xs uppercase tracking-widest text-ink-600">Unfinished</h2>
+          <ul className="space-y-2">
+            {drafts.map((d) => (
+              <li
+                key={d.id}
+                className="flex items-center justify-between gap-4 rounded-xl border border-ink-850 px-4 py-3"
+              >
+                <Link href={`/review?d=${d.id}`} className="min-w-0 flex-1">
+                  <p className="truncate text-sm text-ink-300">{d.name}</p>
+                  <p className="text-xs text-ink-600">
+                    {d.script ? `${d.script.lines.length} lines written` : 'no script yet'}
+                  </p>
+                </Link>
+                <Button
+                  variant="quiet"
+                  onClick={async () => {
+                    await deleteDraft(d.id);
+                    void refresh();
+                  }}
+                >
+                  discard
+                </Button>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      <footer className="mt-16 border-t border-ink-850 pt-6 text-xs text-ink-600">
+        <Link href="/about" className="hover:text-ink-400">
+          About this, and what it is not
+        </Link>
+        {storage && (
+          <p className="mt-2">
+            {(storage.usage / 1e6).toFixed(0)} MB used on this device.
           </p>
-        </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert h-[14px] w-4"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={14}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
-      </main>
-    </div>
+        )}
+      </footer>
+    </Shell>
   );
 }
