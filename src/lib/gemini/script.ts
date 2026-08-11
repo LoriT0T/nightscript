@@ -1,7 +1,7 @@
 import { callInteractions, TEXT_MODEL, withRetry } from './client';
 import { validateScript } from '@/lib/affirmations/validator';
 import { targetLineCounts } from '@/lib/script/plan';
-import type { Goal, Intake, Line, Pattern, Script, Section } from '@/lib/types';
+import type { Goal, Intake, Line, Pattern, Section } from '@/lib/types';
 
 /**
  * Script generation.
@@ -40,11 +40,44 @@ function goalBlock(g: Goal, i: number): string {
     .join('\n');
 }
 
-export function buildScriptPrompt(intake: Intake, minutes: number): string {
+/**
+ * Per-section prompts.
+ *
+ * The whole script used to be written in one call. That call takes about 60 s, and the host
+ * kills a serverless function at ~30 s no matter how diligently it streams — verified in
+ * production, where the stream sent six heartbeats and then died without a result. Sections
+ * are independent, so five smaller calls run in parallel, each finishing in 10-25 s, and the
+ * whole script arrives faster than the single call ever did.
+ */
+const SECTION_BRIEF: Record<Exclude<Section, 'fade'>, (n: number, uniqueCore: number) => string> = {
+  arrival: (n) => `Write ${n} ARRIVAL lines. Settling and breath. Permission to stop listening
+and let the words carry on without them. NO goal content at all — goalId must be null for every
+line. Short: five to nine words. Patterns: sensory, compassion, ambivalence.`,
+
+  downshift: (n) => `Write ${n} DOWNSHIFT lines: a slow body scan moving jaw, shoulders, arms,
+hands, chest, belly, legs, feet. Sensory pattern throughout, goalId null. Five to nine words
+each. Name one body part per line and let it soften. Do not repeat a body part.`,
+
+  core: (_n, uniqueCore) => `Write ${uniqueCore} CORE lines — the densest section, covering the
+goals in proportion to their share. Mix all seven patterns, weighted so that roughly a third are
+implementation intentions ("When <specific cue>, I <specific action>") drawn from their stated
+obstacles. Every line carries the goalId it serves. Ten to sixteen words.`,
+
+  second: (_n, uniqueCore) => `Write ${Math.max(12, Math.round(uniqueCore * 0.45))} SECOND-PASS
+lines: a re-voicing of the same ideas as the core section, but softer, shorter and weighted much
+more heavily to self-compassion and permitted ambivalence. Not verbatim repeats — the gentler
+version of the same thoughts. Seven to eleven words. Carry the goalId.`,
+
+  dissolution: (n) => `Write ${n} DISSOLUTION lines. Fragments, not sentences. Three to six words.
+"Softer now." "Still here." "Nothing to fix tonight." Sparse and trailing. goalId null.`,
+};
+
+export function buildSectionPrompt(intake: Intake, minutes: number, section: Section): string {
   const counts = targetLineCounts(minutes);
   const uniqueCore = Math.max(40, Math.min(60, Math.round(counts.core / 3.5)));
+  const brief = SECTION_BRIEF[section as Exclude<Section, 'fade'>];
 
-  return `You are writing the script for a ${minutes}-minute affirmation track that one person
+  return `You are writing one section of a ${minutes}-minute affirmation track that one person
 will play as they fall asleep. It is read aloud by a single calm female voice. Write only what
 she says.
 
@@ -64,63 +97,34 @@ BANNED, without exception:
   • Superlatives and absolutes: always, never, completely, totally, perfectly, forever,
     unlimited, no matter what, nothing can stop.
   • Second person. No "you", "your", "yourself". Everything is first person, singular.
-  • Exclamation marks. Question marks. Hype of any kind.
+  • Exclamation marks. Question marks. Any interrogative phrasing at all ("Will I…", "Am I…").
   • Any line the listener could answer with "no I'm not".
 
-REQUIRED PATTERNS. Every line is exactly one of these, and you will label it:
-  process      "I am learning to…", "I am building…", "Each day a little more…"
-               Growth underway, never growth claimed as finished.
-  evidence     Anchored to something real they told you above. "I got up at six on the
-               Tuesday it rained. I can do that again." Use their actual detail.
-  compassion   "I can be kind to myself about this." "Struggling with this does not make me
-               broken." Makes no claim about ability, so nothing can contradict it.
-  values       Affirms what they care about rather than a trait they lack. "I care about
-               being someone my people can rely on."
-  intention    "When <specific cue>, I <specific action>." MUST contain a concrete when/if
-               cue drawn from their stated obstacle. These have the strongest evidence of
-               any element here (d = 0.65). Make them the most common pattern in the core
-               section — roughly a third of core lines.
-  ambivalence  "Part of me resists this, and that part is welcome here too." Allowing the
-               contradicting thought outperforms suppressing it. Include these regularly;
-               they are protective, not decorative.
+THE PATTERNS. Every line is exactly one of these, and you will label it:
+  process      "I am learning to…", "I am building…". Growth underway, never claimed as done.
+  evidence     Anchored to something real they told you above, using their actual detail.
+  compassion   "I can be kind to myself about this." Makes no claim that can be contradicted.
+  values       Affirms what they care about rather than a trait they lack.
+  intention    "When <specific cue>, I <specific action>." MUST contain a concrete when/if cue.
+               Strongest evidence of anything here (d = 0.65).
+  ambivalence  "Part of me resists this, and that part is welcome here too." Protective.
   sensory      "My chest is loose. My jaw is soft." Body-anchored, aids sleep onset.
 
-VOICE AND SHAPE:
-  • Short sentences. Under 20 words, most much shorter. Every sentence must fall at the end.
-  • Plain and sincere. No therapist lilt, no poetry, no metaphor-stacking, no "journey",
-    no "embrace", no "radiant", no "flow".
-  • Contractions are fine. Ordinary words only.
-  • No stage directions, no tags in brackets, no speaker names, no numbering in the text.
+VOICE: short sentences, every one falling at the end. Plain and sincere. No therapist lilt, no
+poetry, no metaphor-stacking, no "journey", "embrace", "radiant", "flow". Contractions fine.
+No stage directions, no bracketed tags, no numbering inside the text.
 
-═══ THE STRUCTURE ═══
+═══ YOUR TASK ═══
 
-Return these sections, with roughly these line counts:
-
-  arrival      ${counts.arrival} lines. Settling and breath. Permission to stop listening and let
-               the words carry on without them. NO goal content at all. goalId must be null.
-  downshift    ${counts.downshift} lines. A slow body scan: jaw, shoulders, hands, belly, legs, feet.
-               Sensory pattern throughout. goalId null.
-  core         ${uniqueCore} UNIQUE lines. The densest section, covering the goals in
-               proportion to their share. Mix all seven patterns, weighted to intention.
-               Each line carries the goalId it serves.
-  second       ${Math.max(12, Math.round(uniqueCore * 0.45))} lines. A re-voicing of the core
-               material: same ideas, softer wording, shorter, weighted much more heavily to
-               compassion and ambivalence. Do not simply repeat the core lines verbatim —
-               these are the gentler versions of them.
-  dissolution  ${counts.dissolution} lines. Fragments, not sentences. Three to six words.
-               "Softer now." "Still here." "Nothing to fix tonight." Sparse and trailing.
-
-Do NOT write a fade section; it is silence.
-
-═══ OUTPUT ═══
+${brief(counts[section] ?? 20, uniqueCore)}
 
 Return ONLY a JSON object, no prose, no markdown fences:
 
-{"lines":[{"text":"…","pattern":"process","section":"core","goalId":"<goal id or null>"}]}
+{"lines":[{"text":"…","pattern":"process","section":"${section}","goalId":"<goal id or null>"}]}
 
 pattern ∈ process|evidence|compassion|values|intention|ambivalence|sensory
-section ∈ arrival|downshift|core|second|dissolution
-goalId must be one of the ids given above, or null for arrival/downshift.`;
+Every line must have section "${section}".
+goalId must be one of the ids given above, or null.`;
 }
 
 const SECTIONS: Section[] = ['arrival', 'downshift', 'core', 'second', 'dissolution'];
@@ -177,29 +181,27 @@ async function generateOnce(prompt: string): Promise<string> {
   return extractText(json);
 }
 
-export interface GenerateScriptResult {
-  script: Script;
-  /** Lines the model produced that failed validation and were dropped or repaired. */
+export interface GenerateSectionResult {
+  lines: Line[];
   repairedCount: number;
   droppedCount: number;
 }
 
 /**
- * Generate, validate, and make ONE repair pass over the failures. Anything still failing
- * after the repair pass is dropped rather than shipped — at 3–4 repetitions per line, one
- * bad line is heard a dozen times (docs/AFFIRMATION-DESIGN.md §9c).
+ * Generate ONE section, validate it, make one repair pass over the failures, and drop
+ * anything still failing. Nothing that breaks the rules ships: at three to four repetitions
+ * per line, one bad line is heard a dozen times (docs/AFFIRMATION-DESIGN.md §9c).
  */
-export async function generateScript(
+export async function generateSection(
   intake: Intake,
   minutes: number,
-  opts: { cycles?: number } = {},
-): Promise<GenerateScriptResult> {
-  const prompt = buildScriptPrompt(intake, minutes);
-  let lines = parseScriptJson(await generateOnce(prompt), intake.goals);
+  section: Section,
+): Promise<GenerateSectionResult> {
+  let lines = parseScriptJson(await generateOnce(buildSectionPrompt(intake, minutes, section)), intake.goals);
+  // The model occasionally labels a line with the wrong section; this call only asked for one.
+  lines = lines.map((l) => ({ ...l, section }));
 
   let repairedCount = 0;
-  let droppedCount = 0;
-
   const issues = validateScript(lines, intake.goals);
   const badIds = new Set(issues.filter((i) => i.severity === 'error').map((i) => i.lineId));
 
@@ -211,22 +213,21 @@ export async function generateScript(
     }
 
     const repairPrompt = `These lines from an affirmation script broke the rules. Rewrite each one
-to keep its meaning, its section and its pattern, while fixing the stated problem. Same rules as
-before: first person only, no absolute trait claims, no superlatives, no second person, no
-questions, no exclamation marks, no mystical or wealth framing. Implementation-intention lines
-must contain a concrete "when …" cue.
+to keep its meaning and its pattern while fixing the stated problem. Same rules as before: first
+person only, no absolute trait claims, no superlatives, no second person, no questions or
+interrogative phrasing, no exclamation marks, no mystical or wealth framing.
+Implementation-intention lines must contain a concrete "when …" cue.
 
-${bad.map((l, i) => `${i + 1}. [${l.section}/${l.pattern}] "${l.text}"\n   PROBLEM: ${(byLine.get(l.id) ?? []).join('; ')}`).join('\n')}
+${bad.map((l, i) => `${i + 1}. [${l.pattern}] "${l.text}"\n   PROBLEM: ${(byLine.get(l.id) ?? []).join('; ')}`).join('\n')}
 
-Return ONLY JSON: {"lines":[{"text":"…","pattern":"…","section":"…","goalId":"…"}]} in the same
-order, one replacement per input line.`;
+Return ONLY JSON: {"lines":[{"text":"…","pattern":"…","section":"${section}","goalId":"…"}]} in
+the same order, one replacement per input line.`;
 
     try {
       const replacements = parseScriptJson(await generateOnce(repairPrompt), intake.goals);
       lines = lines.map((l) => {
         if (!badIds.has(l.id)) return l;
-        const idx = bad.findIndex((b) => b.id === l.id);
-        const rep = replacements[idx];
+        const rep = replacements[bad.findIndex((b) => b.id === l.id)];
         if (!rep) return l;
         const candidate: Line = { ...l, text: rep.text };
         if (validateScript([candidate], intake.goals).some((i) => i.severity === 'error')) return l;
@@ -234,21 +235,13 @@ order, one replacement per input line.`;
         return candidate;
       });
     } catch {
-      // Repair pass failed entirely; fall through to dropping.
+      // Repair failed entirely; the drop below is the backstop.
     }
-
-    const stillBad = new Set(
-      validateScript(lines, intake.goals)
-        .filter((i) => i.severity === 'error')
-        .map((i) => i.lineId),
-    );
-    droppedCount = stillBad.size;
-    lines = lines.filter((l) => !stillBad.has(l.id));
   }
 
-  return {
-    script: { lines, cycles: opts.cycles ?? 1 },
-    repairedCount,
-    droppedCount,
-  };
+  const stillBad = new Set(
+    validateScript(lines, intake.goals).filter((i) => i.severity === 'error').map((i) => i.lineId),
+  );
+  const droppedCount = stillBad.size;
+  return { lines: lines.filter((l) => !stillBad.has(l.id)), repairedCount, droppedCount };
 }

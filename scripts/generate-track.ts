@@ -12,12 +12,12 @@
  */
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join, dirname } from 'node:path';
-import { generateScript } from '@/lib/gemini/script';
+import { generateSection } from '@/lib/gemini/script';
 import { runPipeline } from '@/lib/pipeline';
 import { validateScript } from '@/lib/affirmations/validator';
 import { estimateRuntimeSec, formatDuration } from '@/lib/script/plan';
 import { DEFAULT_VOICE } from '@/lib/voices';
-import type { Intake, Script, TrackSettings } from '@/lib/types';
+import type { Intake, Script, Section, TrackSettings } from '@/lib/types';
 
 function arg(name: string, fallback?: string): string | undefined {
   const i = process.argv.indexOf(`--${name}`);
@@ -52,11 +52,13 @@ async function main() {
   } else {
     console.log(`Writing script (${minutes} min, ${intake.goals.length} goals)…`);
     const t0 = Date.now();
-    const res = await generateScript(intake, minutes);
-    script = res.script;
+    const sections: Section[] = ['arrival', 'downshift', 'core', 'second', 'dissolution'];
+    const parts = await Promise.all(sections.map((s) => generateSection(intake, minutes, s)));
+    script = { lines: parts.flatMap((p) => p.lines), cycles: 1 };
     console.log(
       `  ${script.lines.length} lines in ${((Date.now() - t0) / 1000).toFixed(0)}s ` +
-        `(${res.repairedCount} repaired, ${res.droppedCount} dropped)`,
+        `(${parts.reduce((a, p) => a + p.repairedCount, 0)} repaired, ` +
+        `${parts.reduce((a, p) => a + p.droppedCount, 0)} dropped)`,
     );
     const p = `${outBase}.script.json`;
     await writeFile(p, JSON.stringify(script, null, 2));

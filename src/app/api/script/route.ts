@@ -1,21 +1,22 @@
 import { checkAccess } from '@/lib/access';
-import { generateScript } from '@/lib/gemini/script';
-import { validateScript } from '@/lib/affirmations/validator';
-import type { Intake } from '@/lib/types';
+import { generateSection } from '@/lib/gemini/script';
+import type { Intake, Section } from '@/lib/types';
 
 export const runtime = 'nodejs';
 export const maxDuration = 300;
 export const dynamic = 'force-dynamic';
 
+const SECTIONS = new Set<Section>(['arrival', 'downshift', 'core', 'second', 'dissolution']);
+
 /**
- * Write a script from an intake.
+ * Write ONE section of a script.
  *
- * Emits NDJSON and sends its first line immediately. Writing a full script takes ~60 s
- * upstream, which exceeds the time-to-first-byte budget of every serverless host; streaming
- * a heartbeat from the outset keeps the response alive and gives the browser something to
- * show. The result arrives as the final line.
+ * The whole script in one request took ~60 s and the host killed the function at ~30 s —
+ * verified in production, where the response streamed six heartbeats and then died with no
+ * result. Sections are independent, so the browser asks for all five at once and each
+ * returns in 10-25 s.
  *
- * Stateless: the intake is used to build one prompt and is not written anywhere.
+ * Stateless: the intake builds a prompt and is not written anywhere.
  */
 export async function POST(req: Request) {
   const denied = checkAccess(req);
@@ -25,44 +26,22 @@ export async function POST(req: Request) {
     return Response.json({ error: 'Server is missing GEMINI_API_KEY.' }, { status: 503 });
   }
 
-  const { intake, minutes } = (await req.json()) as { intake: Intake; minutes?: number };
+  const { intake, minutes, section } = (await req.json()) as {
+    intake: Intake;
+    minutes?: number;
+    section: Section;
+  };
   if (!intake?.goals?.length) {
     return Response.json({ error: 'No goals provided.' }, { status: 400 });
   }
+  if (!SECTIONS.has(section)) {
+    return Response.json({ error: `Unknown section "${section}".` }, { status: 400 });
+  }
 
-  const encoder = new TextEncoder();
-  const stream = new ReadableStream<Uint8Array>({
-    async start(controller) {
-      const send = (o: unknown) => controller.enqueue(encoder.encode(`${JSON.stringify(o)}\n`));
-      send({ type: 'progress', message: 'Writing the script…' });
-
-      // Something must keep flowing while the model thinks, or intermediaries decide the
-      // response has stalled and cut it.
-      const beat = setInterval(() => send({ type: 'progress', message: 'Still writing…' }), 5000);
-
-      try {
-        const result = await generateScript(intake, minutes ?? 60);
-        clearInterval(beat);
-        send({
-          type: 'result',
-          script: result.script,
-          repairedCount: result.repairedCount,
-          droppedCount: result.droppedCount,
-          issues: validateScript(result.script.lines, intake.goals),
-        });
-      } catch (e) {
-        clearInterval(beat);
-        send({ type: 'error', error: (e as Error).message });
-      }
-      controller.close();
-    },
-  });
-
-  return new Response(stream, {
-    headers: {
-      'Content-Type': 'application/x-ndjson',
-      'Cache-Control': 'no-store',
-      'X-Accel-Buffering': 'no',
-    },
-  });
+  try {
+    const result = await generateSection(intake, minutes ?? 60, section);
+    return Response.json(result);
+  } catch (e) {
+    return Response.json({ error: (e as Error).message }, { status: 500 });
+  }
 }

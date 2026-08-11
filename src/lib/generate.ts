@@ -4,7 +4,7 @@ import { authHeaders } from '@/lib/access';
 import { buildTimeline, planChunks, timelineDurationSec } from '@/lib/script/plan';
 import { assembleInBrowser, type ChunkPcm } from '@/lib/audio/webaudio';
 import { encodeMp3 } from '@/lib/audio/mp3';
-import type { Intake, Measurement, Script, TrackSettings } from '@/lib/types';
+import type { Intake, Line, Measurement, Script, Section, TrackSettings } from '@/lib/types';
 
 /**
  * Client-side generation.
@@ -145,54 +145,49 @@ export async function generateTrack(
   };
 }
 
-/** Stream the script writer, which sends heartbeats while the model works. */
+/**
+ * Write the script by asking for all five sections at once.
+ *
+ * Parallel rather than sequential because each section is an independent prompt, and because
+ * a single whole-script call exceeds the host's function limit (see the route). The sections
+ * come back in whatever order they finish and are reassembled into arc order here.
+ */
+const SCRIPT_SECTIONS: Section[] = ['arrival', 'downshift', 'core', 'second', 'dissolution'];
+
 export async function writeScript(
   intake: Intake,
   minutes: number,
   onProgress: (message: string) => void,
 ): Promise<Script> {
-  const res = await fetch('/api/script', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...authHeaders() },
-    body: JSON.stringify({ intake, minutes }),
-  });
-  if (!res.ok) {
-    let message = `Script request failed (${res.status})`;
-    try {
-      message = ((await res.json()) as { error?: string }).error ?? message;
-    } catch {
-      /* keep generic */
-    }
-    throw new Error(message);
-  }
+  let done = 0;
+  onProgress('Writing the script…');
 
-  const reader = res.body!.getReader();
-  const decoder = new TextDecoder();
-  let buffer = '';
-  let script: Script | null = null;
-  let error: string | null = null;
+  const results = await Promise.all(
+    SCRIPT_SECTIONS.map(async (section) => {
+      const res = await fetch('/api/script', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
+        body: JSON.stringify({ intake, minutes, section }),
+      });
+      if (!res.ok) {
+        let message = `Script request failed (${res.status})`;
+        try {
+          message = ((await res.json()) as { error?: string }).error ?? message;
+        } catch {
+          /* keep generic */
+        }
+        throw new Error(message);
+      }
+      const json = (await res.json()) as { lines: Line[] };
+      done++;
+      onProgress(`Writing the script — ${done} of ${SCRIPT_SECTIONS.length} sections`);
+      return { section, lines: json.lines ?? [] };
+    }),
+  );
 
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-    const lines = buffer.split('\n');
-    buffer = lines.pop() ?? '';
-    for (const line of lines) {
-      if (!line.trim()) continue;
-      const msg = JSON.parse(line) as {
-        type: string;
-        message?: string;
-        script?: Script;
-        error?: string;
-      };
-      if (msg.type === 'progress') onProgress(msg.message ?? '');
-      if (msg.type === 'result') script = msg.script ?? null;
-      if (msg.type === 'error') error = msg.error ?? 'Unknown error';
-    }
-  }
-
-  if (error) throw new Error(error);
-  if (!script) throw new Error('The writer returned nothing.');
-  return script;
+  // Reassemble in arc order, not completion order.
+  const bySection = new Map(results.map((r) => [r.section, r.lines]));
+  const lines = SCRIPT_SECTIONS.flatMap((s) => bySection.get(s) ?? []);
+  if (lines.length === 0) throw new Error('The writer returned nothing usable.');
+  return { lines, cycles: 1 };
 }
