@@ -98,17 +98,31 @@ export async function runPipeline(opts: RunPipelineOptions): Promise<PipelineRes
       message: `Chunk ${i}/${unique.size} (${chunk.section})`,
       fraction: i / unique.size,
     });
-    const res = await synthesizeChunk(
-      { section: chunk.section, text: chunk.text, voice: settings.voice, model: ttsModel },
-      {
-        onWait: (sec, attempt, why) =>
-          say({
-            phase: 'synth',
-            message: `Chunk ${i}/${unique.size}: ${why}, waiting ${sec.toFixed(0)}s (attempt ${attempt})`,
-            fraction: i / unique.size,
-          }),
-      },
-    );
+    let res;
+    try {
+      res = await synthesizeChunk(
+        { section: chunk.section, text: chunk.text, voice: settings.voice, model: ttsModel },
+        {
+          onWait: (sec, attempt, why) =>
+            say({
+              phase: 'synth',
+              message: `Chunk ${i}/${unique.size}: ${why}, waiting ${sec.toFixed(0)}s (attempt ${attempt})`,
+              fraction: i / unique.size,
+            }),
+        },
+      );
+    } catch (e) {
+      if (e instanceof GeminiError && e.code === 'content_blocked') {
+        throw new Error(
+          `The voice model refused chunk ${i}/${unique.size} (${chunk.section}). Its content ` +
+            `filter is stricter on some models than others, and body-scan wording is the usual ` +
+            `trigger. Reword one of these lines and re-run — everything already generated is ` +
+            `cached, so only this chunk costs anything:\n\n` +
+            chunk.lines.map((l) => `    • ${l.text}`).join('\n'),
+        );
+      }
+      throw e;
+    }
     if (res.cached) cachedCount++;
     audio.set(hash, { hash, pcm: res.pcm, lineCount: chunk.lines.length });
   }

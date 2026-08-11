@@ -33,6 +33,23 @@ export interface ExampleTrack {
 
 export const EXAMPLES: ExampleTrack[] = [
   {
+    id: 'dream-15min',
+    name: 'Four times a week — the body, the bike, the life',
+    file: 'dream-15min.m4a',
+    mime: 'audio/mp4',
+    durationSec: 930.3,
+    bytes: 3823105,
+    goals: [
+      'Get back to the gym four times a week and stay there',
+      'Get properly strong and build a body that looks like it trains',
+      'Build the life I am training for — the bike, the freedom, money I earned',
+    ],
+    lufs: -24.5,
+    truePeakDb: -3.5,
+    voice: 'Sulafat',
+    madeAt: '2026-08-11',
+  },
+  {
     id: 'gym-10min',
     name: 'Training — showing up, and the last few reps',
     file: 'gym-10min.m4a',

@@ -90,16 +90,25 @@ export async function measureMinutePeak(
 }
 
 /**
- * True after minute 4, no minute exceeds the minute before it. A small tolerance is
- * allowed because RMS over a window that straddles a long pause is noisy; 0.5 dB is well
- * under the ~1 dB just-noticeable difference for slow level changes.
+ * The descent constraint: after minute four, no minute is louder than anything that came
+ * before it.
+ *
+ * Must stay identical to the browser assembler's version in src/lib/audio/webaudio.ts. They
+ * drifted apart once and the two renderers disagreed about whether the same track passed —
+ * the CLI was still applying a strict minute-over-minute test, which real speech fails on
+ * noise alone, since natural variation between adjacent minutes is far larger than the
+ * taper's 0.14 dB/min. The ceiling is the loudest minute of the opening, which is exactly
+ * what the enforcement pass caps against.
  */
-export function isMonotonicAfter(minuteRms: number[], fromMinute = 4, toleranceDb = 0.5): boolean {
-  for (let i = fromMinute + 1; i < minuteRms.length; i++) {
-    const prev = minuteRms[i - 1];
-    const cur = minuteRms[i];
-    if (!Number.isFinite(prev) || !Number.isFinite(cur)) continue;
-    if (cur > prev + toleranceDb) return false;
+export function isMonotonicAfter(minutePeak: number[], fromMinute = 4, toleranceDb = 0.5): boolean {
+  const opening = minutePeak.slice(0, fromMinute + 1).filter(Number.isFinite);
+  if (opening.length === 0) return true;
+  let ceiling = Math.max(...opening);
+  for (let i = fromMinute + 1; i < minutePeak.length; i++) {
+    const cur = minutePeak[i];
+    if (!Number.isFinite(cur)) continue;
+    if (cur > ceiling + toleranceDb) return false;
+    ceiling = Math.max(ceiling, cur);
   }
   return true;
 }

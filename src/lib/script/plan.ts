@@ -204,6 +204,8 @@ export interface Chunk {
 export const CHUNK_TARGET_WORDS = 80;
 export const CHUNK_MAX_WORDS = 120;
 export const CHUNK_MAX_LINES = 8;
+/** A trailing chunk shorter than this is merged backwards rather than sent on its own. */
+export const MIN_TAIL_WORDS = 25;
 
 export function planChunks(script: Script): Chunk[] {
   const chunks: Chunk[] = [];
@@ -246,8 +248,28 @@ export function planChunks(script: Script): Chunk[] {
       words += w;
     });
     flush();
+
+    // Fold a tiny trailing chunk back into the one before it.
+    //
+    // A section whose line count divides badly leaves a remainder of one or two fragments as
+    // its own request. That is wasteful, it puts a seam in for no reason, and — measured —
+    // it is what the stricter voice model's content filter chokes on: a request containing
+    // only "morning will come" and "steady from here" was refused as a policy violation,
+    // which it plainly is not. Very short inputs seem to give the classifier nothing to go on.
+    const inSection = chunks.filter((c) => c.section === section);
+    if (inSection.length >= 2) {
+      const last = inSection[inSection.length - 1];
+      const prev = inSection[inSection.length - 2];
+      const lastWords = last.lines.reduce((a, l) => a + l.text.trim().split(/\s+/).length, 0);
+      if (lastWords < MIN_TAIL_WORDS) {
+        prev.lines = [...prev.lines, ...last.lines];
+        prev.pauses = [...prev.pauses, ...last.pauses];
+        prev.text = prev.lines.map((l) => l.text).join('\n\n');
+        chunks.splice(chunks.indexOf(last), 1);
+      }
+    }
   }
-  return chunks;
+  return chunks.map((c, i) => ({ ...c, index: i }));
 }
 
 /**
