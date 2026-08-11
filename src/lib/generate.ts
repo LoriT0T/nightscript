@@ -1,6 +1,7 @@
 'use client';
 
 import { authHeaders } from '@/lib/access';
+import { getCachedChunk, putCachedChunk } from '@/lib/db';
 import { validateScript } from '@/lib/affirmations/validator';
 import { buildTimeline, planChunks, timelineDurationSec } from '@/lib/script/plan';
 import { assembleInBrowser, type ChunkPcm } from '@/lib/audio/webaudio';
@@ -33,6 +34,8 @@ export interface GenerateProgress {
 export interface GenerateResult {
   blob: Blob;
   mime: string;
+  /** How many chunks came from the local cache instead of the API. */
+  cachedCount: number;
   measurement: Measurement;
   splitFallbacks: number;
   chunkCount: number;
@@ -44,6 +47,16 @@ export interface GenerateResult {
 
 /** How many chunks to speak at once. Small enough to be a polite API citizen. */
 const CONCURRENCY = 3;
+
+/**
+ * Cache key for one spoken chunk. Covers everything that can change the audio. SHA-256 via
+ * WebCrypto, so it matches the server-side key format used by the CLI renderer.
+ */
+async function chunkKey(section: string, text: string, voice: string): Promise<string> {
+  const data = new TextEncoder().encode(`${voice}\u0000${section}\u0000${text}`);
+  const digest = await crypto.subtle.digest('SHA-256', data);
+  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
 
 /**
  * Speak one chunk, retrying transient failures.
@@ -131,18 +144,30 @@ export async function generateTrack(
   const unique = new Map(chunks.map((c) => [c.hashKey, c]));
   const audio = new Map<string, ChunkPcm>();
   let done = 0;
+  let cached = 0;
 
   const queue = [...unique.values()];
   const workers = Array.from({ length: Math.min(CONCURRENCY, queue.length) }, async () => {
     for (;;) {
       const chunk = queue.shift();
       if (!chunk) return;
-      const pcm = await speakChunk(chunk.section, chunk.text, settings.voice, signal);
+
+      const key = await chunkKey(chunk.section, chunk.text, settings.voice);
+      let pcm = await getCachedChunk(key).catch(() => null);
+      let fromCache = true;
+      if (!pcm) {
+        fromCache = false;
+        pcm = await speakChunk(chunk.section, chunk.text, settings.voice, signal);
+        await putCachedChunk(key, pcm).catch(() => {});
+      } else {
+        cached++;
+      }
+
       audio.set(chunk.hashKey, { hashKey: chunk.hashKey, pcm, lineCount: chunk.lines.length });
       done++;
       onProgress({
         phase: 'speak',
-        message: `Speaking — ${done} of ${unique.size} passages`,
+        message: `Speaking — ${done} of ${unique.size} passages${fromCache ? ' (cached)' : ''}`,
         fraction: (done / unique.size) * 0.75,
       });
     }
@@ -164,6 +189,7 @@ export async function generateTrack(
   return {
     blob,
     mime,
+    cachedCount: cached,
     measurement: assembled.measurement,
     splitFallbacks: assembled.splitFallbacks,
     chunkCount: plays.length,
