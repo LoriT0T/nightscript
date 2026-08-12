@@ -45,7 +45,7 @@ export async function runPipeline(opts: RunPipelineOptions): Promise<PipelineRes
   const { script, settings } = opts;
 
   if (!opts.skipValidation) {
-    const issues = validateScript(script.lines, opts.intake.goals);
+    const issues = validateScript(script.lines, opts.intake.goals, settings.style);
     if (hasBlockingIssues(issues)) {
       const first = issues.filter((i) => i.severity === 'error').slice(0, 5);
       throw new Error(

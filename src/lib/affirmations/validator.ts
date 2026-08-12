@@ -1,4 +1,4 @@
-import type { Goal, Line, Pattern, ValidationIssue } from '@/lib/types';
+import type { Goal, Line, Pattern, ValidationIssue, WritingStyle } from '@/lib/types';
 
 /**
  * Line validator. Every rule here traces to docs/AFFIRMATION-DESIGN.md; the section is
@@ -12,12 +12,18 @@ interface Rule {
   id: string;
   severity: 'error' | 'warn';
   why: string;
+  /**
+   * Which writing styles this rule applies to. Rules about harm apply to both; rules that
+   * encode the process style's taste apply only to it. See docs/AFFIRMATION-STYLE.md §4.
+   */
+  styles?: WritingStyle[];
   /** Return the offending substring, or null if the line is fine. */
   test: (line: Line, ctx: Ctx) => string | null;
 }
 
 interface Ctx {
   goal?: Goal;
+  style: WritingStyle;
 }
 
 /** Traits people silently contradict. Deliberately broad. */
@@ -181,6 +187,7 @@ export const RULES: Rule[] = [
   {
     id: 'absolute-trait',
     severity: 'error',
+    styles: ['process'],
     why: '§1 Wood et al. 2009 — absolute trait claims recruit counter-evidence and lower mood in exactly the listener who needs them.',
     test: (line) => {
       // "I am <trait>" / "I'm <trait>" with nothing hedging it.
@@ -201,6 +208,7 @@ export const RULES: Rule[] = [
   {
     id: 'superlative',
     severity: 'error',
+    styles: ['process'],
     why: '§1 — magnitude of the claim scales the counter-evidence it recruits.',
     test: (line) => firstMatch(line.text, SUPERLATIVES),
   },
@@ -239,6 +247,7 @@ export const RULES: Rule[] = [
   {
     id: 'low-belief-absolute',
     severity: 'error',
+    styles: ['process'],
     why: '§2 — a goal rated below 4 is outside the latitude of acceptance; only process, compassion, values or intention framings are permitted.',
     test: (line, ctx) => {
       if (!ctx.goal || ctx.goal.believability >= 4) return null;
@@ -266,10 +275,25 @@ export const RULES: Rule[] = [
   {
     id: 'too-long',
     severity: 'warn',
-    why: '§10 — long sentences force breath support, which raises energy. Short falling sentences hold the arc.',
-    test: (line) => {
+    why: 'design §10 — long sentences force breath support, which raises energy. Short falling sentences hold the arc.',
+    test: (line, ctx) => {
       const words = line.text.trim().split(/\s+/).length;
-      return words > 26 ? `${words} words` : null;
+      // The reference tracks sit at a median of 9 words and a 90th percentile of 14
+      // (style §2), so scripting lines are held much tighter than process ones.
+      const cap = ctx.style === 'scripting' ? 16 : 26;
+      return words > cap ? `${words} words` : null;
+    },
+  },
+  {
+    id: 'future-tense',
+    severity: 'warn',
+    styles: ['scripting'],
+    why: 'style §2 — the reference has essentially no "I will". The scripting voice describes the life in the present rather than promising it, so future tense breaks the form.',
+    test: (line) => {
+      // "I will" inside an implementation intention is the one legitimate use.
+      if (line.pattern === 'intention') return null;
+      const m = /\b(i will|i'll|one day|someday|i am going to|i'm going to)\b/i.exec(line.text);
+      return m ? m[0] : null;
     },
   },
   {
@@ -285,10 +309,15 @@ export const RULES: Rule[] = [
   },
 ];
 
-export function validateLine(line: Line, goal?: Goal): ValidationIssue[] {
-  const ctx: Ctx = { goal };
+export function validateLine(
+  line: Line,
+  goal?: Goal,
+  style: WritingStyle = 'scripting',
+): ValidationIssue[] {
+  const ctx: Ctx = { goal, style };
   const issues: ValidationIssue[] = [];
   for (const rule of RULES) {
+    if (rule.styles && !rule.styles.includes(style)) continue;
     const match = rule.test(line, ctx);
     if (match) {
       issues.push({
@@ -303,9 +332,15 @@ export function validateLine(line: Line, goal?: Goal): ValidationIssue[] {
   return issues;
 }
 
-export function validateScript(lines: Line[], goals: Goal[]): ValidationIssue[] {
+export function validateScript(
+  lines: Line[],
+  goals: Goal[],
+  style: WritingStyle = 'scripting',
+): ValidationIssue[] {
   const byId = new Map(goals.map((g) => [g.id, g]));
-  return lines.flatMap((l) => validateLine(l, l.goalId ? byId.get(l.goalId) : undefined));
+  return lines.flatMap((l) =>
+    validateLine(l, l.goalId ? byId.get(l.goalId) : undefined, style),
+  );
 }
 
 export function hasBlockingIssues(issues: ValidationIssue[]): boolean {

@@ -52,7 +52,13 @@ function Review() {
     setWriting(true);
     setError(null);
     try {
-      const script = await writeScriptApi(d.intake, d.settings.minutes, setProgress);
+      const script = await writeScriptApi(
+        d.intake,
+        d.settings.minutes,
+        setProgress,
+        undefined,
+        d.settings.style ?? 'scripting',
+      );
       const next = { ...d, script };
       setDraft(next);
       await saveDraft(next);
@@ -72,7 +78,10 @@ function Review() {
   }, [draft, writing, writeScript]);
 
   const issues = useMemo(
-    () => (draft?.script ? validateScript(draft.script.lines, draft.intake.goals) : []),
+    () =>
+      draft?.script
+        ? validateScript(draft.script.lines, draft.intake.goals, draft.settings.style ?? 'scripting')
+        : [],
     [draft],
   );
   const errors = issues.filter((i) => i.severity === 'error');
@@ -219,9 +228,19 @@ function Review() {
                       }
                       onRegenerate={async () => {
                         const raw = await generateText(
-                          buildRepairPrompt(draft.intake, line, ['give a different wording']),
+                          buildRepairPrompt(
+                            draft.intake,
+                            line,
+                            ['give a different wording'],
+                            draft.settings.style ?? 'scripting',
+                          ),
                         );
-                        const fixed = acceptRepair(draft.intake, line, raw);
+                        const fixed = acceptRepair(
+                          draft.intake,
+                          line,
+                          raw,
+                          draft.settings.style ?? 'scripting',
+                        );
                         if (fixed) {
                           await mutate(
                             draft.script!.lines.map((l) =>

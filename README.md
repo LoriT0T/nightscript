@@ -7,7 +7,12 @@ edit before a single word is spoken, then produces a sixty-minute track in a cal
 voice, shaped to descend from the first minute to the last so that if you are asleep by
 minute twelve nothing later wakes you.
 
-Two documents carry the reasoning and should be read before changing anything:
+Three documents carry the reasoning and should be read before changing anything:
+
+- **[docs/AFFIRMATION-STYLE.md](docs/AFFIRMATION-STYLE.md)** — the default writing voice, derived
+  by measuring reference tracks the listener supplied: first person, present tense, gratitude-led,
+  median nine words. Says plainly where it conflicts with the research below, and which rails stay
+  on regardless.
 
 - **[docs/AFFIRMATION-DESIGN.md](docs/AFFIRMATION-DESIGN.md)** — why the lines are worded the
   way they are, with sources. Every rule in the validator traces to a numbered section here,
@@ -178,6 +183,26 @@ Nothing is stored. There is no account, no database, and no server-side copy of 
 - The generated audio chunks are cached on disk under `.cache/tts/`, keyed by content hash, so
   that editing one line does not re-spend the whole hour. Delete that directory to clear them.
 - The API key is read from `process.env` on the server and never sent to the browser.
+
+## Two writing styles
+
+`TrackSettings.style` picks the voice, and it changes the prompt, the line forms and which
+validator rules apply.
+
+- **`scripting`** (default) — the measured reference style. "I'm so grateful that…", "I have…",
+  "I am someone who…", "It feels…". Everything present tense, spoken as already true.
+- **`process`** — the research-led style. "I am learning to…", implementation intentions,
+  permitted ambivalence, believability-gated.
+
+They genuinely conflict: the scripting style is built from exactly the present-tense claims the
+process style forbids, and docs/AFFIRMATION-STYLE.md §4 lays that out rather than papering over
+it. What stays banned in **both** is the set of rules about harm rather than taste — second
+person, questions, exclamations, mystical/manifestation vocabulary, and shame or "never again"
+on addiction and mental-health goals.
+
+One useful finding from the measurement: the reference tracks contain **zero** instances of
+`universe`, `manifest`, `abundance`, `vibration` or `attract`. The cosmic register is not part of
+this style, so keeping it banned costs nothing.
 
 ## The player
 

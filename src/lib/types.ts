@@ -8,7 +8,15 @@ export type Pattern =
   | 'values'
   | 'intention'
   | 'ambivalence'
-  | 'sensory';
+  | 'sensory'
+  // Scripting-style forms. See docs/AFFIRMATION-STYLE.md §2.
+  | 'gratitude'
+  | 'having'
+  | 'identity'
+  | 'capability'
+  | 'feeling'
+  | 'reciprocity'
+  | 'trust';
 
 export const PATTERNS: Pattern[] = [
   'process',
@@ -18,6 +26,13 @@ export const PATTERNS: Pattern[] = [
   'intention',
   'ambivalence',
   'sensory',
+  'gratitude',
+  'having',
+  'identity',
+  'capability',
+  'feeling',
+  'reciprocity',
+  'trust',
 ];
 
 export const PATTERN_LABEL: Record<Pattern, string> = {
@@ -28,6 +43,13 @@ export const PATTERN_LABEL: Record<Pattern, string> = {
   intention: 'Implementation intention',
   ambivalence: 'Permitted ambivalence',
   sensory: 'Sensory',
+  gratitude: 'Gratitude',
+  having: 'Already having',
+  identity: 'Identity',
+  capability: 'Capability',
+  feeling: 'Feeling',
+  reciprocity: 'Reciprocity',
+  trust: 'Trust',
 };
 
 /** Sections of the descending arc. See docs/AFFIRMATION-DESIGN.md §8 and the brief §3. */
@@ -74,8 +96,20 @@ export interface Intake {
   note?: string;
 }
 
+/**
+ * Which writing voice to use.
+ *
+ * `scripting` is the style measured from the listener's reference tracks — first person,
+ * present tense, gratitude-led, spoken as already true. See docs/AFFIRMATION-STYLE.md.
+ * `process` is the research-led style — "I am learning to…", implementation intentions,
+ * permitted ambivalence. See docs/AFFIRMATION-DESIGN.md.
+ */
+export type WritingStyle = 'scripting' | 'process';
+
 export interface TrackSettings {
   voice: string;
+  /** Defaults to 'scripting'. */
+  style?: WritingStyle;
   bed: 'none' | 'pink' | 'brown' | 'rain';
   bedLevelDb: number;
   /** Total target minutes. 60 by default; shorter is allowed for testing. */

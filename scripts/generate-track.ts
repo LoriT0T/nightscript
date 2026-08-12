@@ -36,6 +36,7 @@ async function main() {
   const minutes = Number(arg('minutes', '60'));
   const settings: TrackSettings = {
     voice: arg('voice', DEFAULT_VOICE)!,
+    style: (arg('style', 'scripting') as TrackSettings['style']) ?? 'scripting',
     bed: (arg('bed', 'pink') as TrackSettings['bed']) ?? 'pink',
     bedLevelDb: Number(arg('bed-db', '-34')),
     minutes,
@@ -54,7 +55,9 @@ async function main() {
     console.log(`Writing script (${minutes} min, ${intake.goals.length} goals)…`);
     const t0 = Date.now();
     const sections: Section[] = ['arrival', 'downshift', 'core', 'second', 'dissolution'];
-    const parts = await Promise.all(sections.map((s) => generateSection(intake, minutes, s)));
+    const parts = await Promise.all(
+      sections.map((s) => generateSection(intake, minutes, s, undefined, undefined, settings.style)),
+    );
     script = { lines: parts.flatMap((p) => p.lines), cycles: 1 };
     console.log(
       `  ${script.lines.length} lines in ${((Date.now() - t0) / 1000).toFixed(0)}s ` +
@@ -70,9 +73,10 @@ async function main() {
   for (const l of script.lines) bySection.set(l.section, (bySection.get(l.section) ?? 0) + 1);
   console.log(`  sections: ${[...bySection].map(([k, v]) => `${k}=${v}`).join(' ')}`);
 
-  const issues = validateScript(script.lines, intake.goals);
+  const issues = validateScript(script.lines, intake.goals, settings.style);
   const errors = issues.filter((i) => i.severity === 'error');
   const warns = issues.filter((i) => i.severity === 'warn');
+  console.log(`  style: ${settings.style}`);
   console.log(`  validator: ${errors.length} errors, ${warns.length} warnings`);
   for (const e of errors.slice(0, 10)) console.log(`    ✗ ${e.rule}: "${e.match}"`);
 

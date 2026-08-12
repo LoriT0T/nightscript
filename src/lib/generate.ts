@@ -6,6 +6,7 @@ import {
   acceptRepair,
   buildRepairPrompt,
   buildSectionPrompt,
+  classifyScriptingPattern,
   parseScriptJson,
   sectionLineTarget,
 } from '@/lib/gemini/script';
@@ -20,6 +21,7 @@ import type {
   Script,
   Section,
   TrackSettings,
+  WritingStyle,
 } from '@/lib/types';
 
 /**
@@ -177,52 +179,96 @@ export async function generateTrack(
  * hardcoding them once gave a 10-minute track the same 146 lines as an hour, which overran
  * by 2:14 with the pauses already at their floor.
  */
-const SECTION_BATCHES: Array<{ section: Section; notes: string[] }> = [
-  {
-    section: 'arrival',
-    notes: [
-      'Focus on arriving and putting the day down.',
-      'Focus on breath and on permission to stop listening.',
-    ],
-  },
-  {
-    section: 'downshift',
-    notes: [
-      'Work downward from jaw and face to the chest.',
-      'Work downward from the belly to the feet.',
-    ],
-  },
-  {
-    section: 'core',
-    notes: [
-      'Weight towards implementation intentions built from their stated obstacle.',
-      'Weight towards evidence anchored in the specific past moment they described.',
-      'Weight towards values and process framing.',
-      'Weight towards permitted ambivalence and self-compassion.',
-    ],
-  },
-  {
-    section: 'second',
-    notes: [
-      'The gentler re-voicing. Compassion first.',
-      'The gentler re-voicing. Ambivalence and permission first.',
-    ],
-  },
-  {
-    section: 'dissolution',
-    notes: ['Fragments about the body settling.', 'Fragments about letting the day go.'],
-  },
-];
+const BATCH_NOTES: Record<WritingStyle, Array<{ section: Section; notes: string[] }>> = {
+  // Each batch gets a different emphasis so four parallel calls do not converge on the same
+  // lines. The emphases have to match the style, or the notes fight the rules.
+  scripting: [
+    {
+      section: 'arrival',
+      notes: [
+        'Gratitude that the day is finished and can be set down.',
+        'The feeling of the bed and of being allowed to stop.',
+      ],
+    },
+    {
+      section: 'downshift',
+      notes: [
+        'Work downward from jaw and face to the chest.',
+        'Work downward from the stomach to the feet.',
+      ],
+    },
+    {
+      section: 'core',
+      notes: [
+        'Lead with gratitude lines about the goals, already true.',
+        'Lead with what they already have, and what they are able to do.',
+        'Lead with the feeling of it, and with concrete sensory detail of the life.',
+        'Lead with who they are to their people, and with trust that it is working.',
+      ],
+    },
+    {
+      section: 'second',
+      notes: [
+        'The softer re-voicing. Gratitude first.',
+        'The softer re-voicing. Name the feeling first.',
+      ],
+    },
+    {
+      section: 'dissolution',
+      notes: [
+        'Fragments of the life, warm and concrete.',
+        'Fragments of settling and of the day being done.',
+      ],
+    },
+  ],
+  process: [
+    {
+      section: 'arrival',
+      notes: [
+        'Focus on arriving and putting the day down.',
+        'Focus on breath and on permission to stop listening.',
+      ],
+    },
+    {
+      section: 'downshift',
+      notes: [
+        'Work downward from jaw and face to the chest.',
+        'Work downward from the belly to the feet.',
+      ],
+    },
+    {
+      section: 'core',
+      notes: [
+        'Weight towards implementation intentions built from their stated obstacle.',
+        'Weight towards evidence anchored in the specific past moment they described.',
+        'Weight towards values and process framing.',
+        'Weight towards permitted ambivalence and self-compassion.',
+      ],
+    },
+    {
+      section: 'second',
+      notes: [
+        'The gentler re-voicing. Compassion first.',
+        'The gentler re-voicing. Ambivalence and permission first.',
+      ],
+    },
+    {
+      section: 'dissolution',
+      notes: ['Fragments about the body settling.', 'Fragments about letting the day go.'],
+    },
+  ],
+};
 
 /** Never ask for more than this in one request — it is what keeps a call inside 30 seconds. */
 const MAX_LINES_PER_REQUEST = 15;
 
 function planScriptRequests(
   minutes: number,
+  style: WritingStyle = 'scripting',
 ): Array<{ section: Section; lineCount: number; variantNote: string }> {
   const out: Array<{ section: Section; lineCount: number; variantNote: string }> = [];
 
-  for (const { section, notes } of SECTION_BATCHES) {
+  for (const { section, notes } of BATCH_NOTES[style]) {
     const total = sectionLineTarget(minutes, section);
     if (total <= 0) continue;
     // Use as few batches as the per-request ceiling allows, so short tracks do not fan out
@@ -252,18 +298,30 @@ export async function writeScript(
   minutes: number,
   onProgress: (message: string) => void,
   signal?: AbortSignal,
+  style: WritingStyle = 'scripting',
 ): Promise<Script> {
   let done = 0;
-  const requests = planScriptRequests(minutes);
+  const requests = planScriptRequests(minutes, style);
   onProgress('Writing the script…');
 
   const batches = await Promise.all(
     requests.map(async (request) => {
       const raw = await generateText(
-        buildSectionPrompt(intake, minutes, request.section, request.lineCount, request.variantNote),
+        buildSectionPrompt(
+          intake,
+          minutes,
+          request.section,
+          request.lineCount,
+          request.variantNote,
+          style,
+        ),
         signal,
       );
-      const lines = parseScriptJson(raw, intake.goals).map((l) => ({ ...l, section: request.section }));
+      const lines = parseScriptJson(raw, intake.goals).map((l) => ({
+        ...l,
+        section: request.section,
+        pattern: style === 'scripting' ? classifyScriptingPattern(l.text, l.pattern) : l.pattern,
+      }));
       done++;
       onProgress(`Writing the script — ${done} of ${requests.length} passes`);
       return { section: request.section, lines };
@@ -278,7 +336,7 @@ export async function writeScript(
   // dropped rather than shipped: at three to four repetitions per line, one bad line is
   // heard a dozen times.
   const problems = new Map<string, string[]>();
-  for (const issue of validateScript(lines, intake.goals)) {
+  for (const issue of validateScript(lines, intake.goals, style)) {
     if (issue.severity !== 'error') continue;
     problems.set(issue.lineId, [
       ...(problems.get(issue.lineId) ?? []),
@@ -296,10 +354,10 @@ export async function writeScript(
         if (!line) return;
         try {
           const raw = await generateText(
-            buildRepairPrompt(intake, line, problems.get(lineId) ?? []),
+            buildRepairPrompt(intake, line, problems.get(lineId) ?? [], style),
             signal,
           );
-          const fixed = acceptRepair(intake, line, raw);
+          const fixed = acceptRepair(intake, line, raw, style);
           if (fixed) fixes.set(lineId, fixed);
         } catch {
           // Leave it broken; the drop below is the backstop.
@@ -309,7 +367,7 @@ export async function writeScript(
     lines = lines.map((l) => fixes.get(l.id) ?? l);
 
     const stillBad = new Set(
-      validateScript(lines, intake.goals)
+      validateScript(lines, intake.goals, style)
         .filter((i) => i.severity === 'error')
         .map((i) => i.lineId),
     );

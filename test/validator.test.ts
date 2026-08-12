@@ -91,11 +91,11 @@ const MUST_REJECT: Array<[string, string, Partial<Line>?, Goal?]> = [
   ['My willpower is stronger than the urge.', 'sensitive-shame', { goalId: 'g1' }, goal({ sensitive: true })],
 ];
 
-test('rejects banned phrasings', () => {
+test('process style rejects banned phrasings', () => {
   const missed: string[] = [];
   for (const [text, expectedRule, over, g] of MUST_REJECT) {
     const l = { ...line(text), ...over };
-    const issues = validateLine(l, g);
+    const issues = validateLine(l, g, 'process');
     const errors = issues.filter((i) => i.severity === 'error');
     if (errors.length === 0) {
       missed.push(`NOT CAUGHT AT ALL: "${text}"`);
@@ -110,11 +110,80 @@ test('rejects banned phrasings', () => {
   assert.deepEqual(missed, [], `\n${missed.join('\n')}`);
 });
 
-test('every banned phrasing blocks generation', () => {
+test('every banned phrasing blocks generation in the process style', () => {
   for (const [text, , over, g] of MUST_REJECT) {
     const l = { ...line(text), ...over };
-    assert.ok(hasBlockingIssues(validateLine(l, g)), `should block: "${text}"`);
+    assert.ok(hasBlockingIssues(validateLine(l, g, 'process')), `should block: "${text}"`);
   }
+});
+
+// ---------------------------------------------------------------------------
+// SCRIPTING STYLE — docs/AFFIRMATION-STYLE.md
+//
+// This style is made of the present-tense claims the process style forbids, so most of the
+// set above must now PASS. What stays banned is the set of rules about harm rather than
+// taste, plus the two the style itself defines: present tense, and short.
+// ---------------------------------------------------------------------------
+
+const SCRIPTING_MUST_PASS: string[] = [
+  "I'm so grateful that my mornings start early now.",
+  "I'm really grateful for the way my body feels.",
+  'I have a body that carries me easily.',
+  'I am someone who trains four times a week.',
+  'I am a person my people can depend on.',
+  'I can lift heavier than I could last month.',
+  "I'm able to get up before the house wakes.",
+  'It feels good to be this strong.',
+  'I feel steady in my own skin.',
+  'I trust the work I am putting in.',
+  'Money I earned is there when I need it.',
+  'The engine is warm under me and the road is open.',
+];
+
+const SCRIPTING_MUST_REJECT: Array<[string, string, Partial<Line>?, Goal?]> = [
+  // Harm rails, unchanged by style.
+  ['You are strong now.', 'second-person'],
+  ['Your body is changing.', 'second-person'],
+  ['I am unstoppable!', 'exclamation'],
+  ['Am I the kind of person who follows through.', 'interrogative'],
+  ['The universe is sending me everything I want.', 'mystical'],
+  ['I am aligned with abundance.', 'mystical'],
+  ['My vibration is high tonight.', 'mystical'],
+  ['A relapse would mean I failed.', 'sensitive-shame', { goalId: 'g1' }, goal({ sensitive: true })],
+  ['My willpower is stronger than the urge.', 'sensitive-shame', { goalId: 'g1' }, goal({ sensitive: true })],
+  // Style rails.
+  ['I will be strong one day.', 'future-tense'],
+  ["Someday I'll have the life I want.", 'future-tense'],
+  ['I put my feet on the floor.', 'intention-needs-cue', { pattern: 'intention' }],
+];
+
+test('scripting style accepts present-tense affirmations', () => {
+  const wrong: string[] = [];
+  for (const text of SCRIPTING_MUST_PASS) {
+    const errors = validateLine(line(text, 'gratitude'), undefined, 'scripting').filter(
+      (i) => i.severity === 'error',
+    );
+    if (errors.length) wrong.push(`"${text}" rejected by ${errors.map((e) => e.rule).join(',')}`);
+  }
+  assert.deepEqual(wrong, [], `\n${wrong.join('\n')}`);
+});
+
+test('scripting style still rejects the harm rails and the style rails', () => {
+  const missed: string[] = [];
+  for (const [text, expectedRule, over, g] of SCRIPTING_MUST_REJECT) {
+    const l = { ...line(text, 'gratitude'), ...over };
+    const found = validateLine(l, g, 'scripting');
+    if (!found.some((i) => i.rule === expectedRule)) {
+      missed.push(`"${text}" — expected ${expectedRule}, got ${found.map((i) => i.rule).join(',') || 'nothing'}`);
+    }
+  }
+  assert.deepEqual(missed, [], `\n${missed.join('\n')}`);
+});
+
+test('scripting style holds lines short', () => {
+  const long = 'I am so grateful that every single part of my life is working out exactly the way I always hoped it would.';
+  const issues = validateLine(line(long, 'gratitude'), undefined, 'scripting');
+  assert.ok(issues.some((i) => i.rule === 'too-long'), 'a 21-word line should be flagged');
 });
 
 // ---------------------------------------------------------------------------
@@ -145,11 +214,11 @@ const MUST_PASS: Array<[string, Pattern, Goal?]> = [
   ['A hard night does not undo the work.', 'compassion', goal({ sensitive: true })],
 ];
 
-test('accepts properly written affirmations', () => {
+test('process style accepts properly written affirmations', () => {
   const wrong: string[] = [];
   for (const [text, pattern, g] of MUST_PASS) {
     const l = line(text, pattern, 'core', g ? g.id : null);
-    const errors = validateLine(l, g).filter((i) => i.severity === 'error');
+    const errors = validateLine(l, g, 'process').filter((i) => i.severity === 'error');
     if (errors.length > 0) {
       wrong.push(`"${text}" wrongly rejected by ${errors.map((e) => e.rule).join(',')}`);
     }
@@ -163,7 +232,7 @@ test('validateScript maps goals to their lines', () => {
     line('I am learning to get up sooner.', 'process', 'core', 'g1'),
     line('I got up at six before, so I am a morning person now.', 'evidence', 'core', 'g1'),
   ];
-  const issues = validateScript(lines, [g]);
+  const issues = validateScript(lines, [g], 'process');
   assert.ok(issues.some((i) => i.rule === 'low-belief-absolute'));
   assert.ok(!issues.some((i) => i.lineId === lines[0].id && i.severity === 'error'));
 });

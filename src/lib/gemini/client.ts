@@ -19,9 +19,15 @@ export const TTS_MODEL = process.env.NIGHTSCRIPT_TTS_MODEL ?? 'gemini-3.1-flash-
  * The fallback is chosen ONCE, before the first chunk, and then used for every chunk in the
  * track. Switching models mid-track would put an audible seam in the middle of the hour,
  * which is worse than not producing the track at all.
+ *
+ * It is `2.5-pro`, not `2.5-flash`, because their content filters differ sharply. Measured
+ * 2026-08-12: flash refused an ordinary body-scan chunk as a policy violation, and refused a
+ * chunk containing only "morning will come" and "steady from here". Pro accepted the same
+ * body scan on the first try. Flash is faster and cheaper and would otherwise be the obvious
+ * pick; it is unusable for this material.
  */
 export const TTS_FALLBACK_MODEL =
-  process.env.NIGHTSCRIPT_TTS_FALLBACK ?? 'gemini-2.5-flash-preview-tts';
+  process.env.NIGHTSCRIPT_TTS_FALLBACK ?? 'gemini-2.5-pro-preview-tts';
 /**
  * Script writing model.
  *
