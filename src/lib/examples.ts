@@ -34,18 +34,18 @@ export interface ExampleTrack {
 export const EXAMPLES: ExampleTrack[] = [
   {
     id: 'dream-5min',
-    name: 'The life I am training for — gratitude, in the present tense',
+    name: 'Four times a week — affirmations only, each said two or three times',
     file: 'dream-5min.m4a',
     mime: 'audio/mp4',
-    durationSec: 312.1,
-    bytes: 1271205,
+    durationSec: 300.0,
+    bytes: 1221509,
     goals: [
       'Four times a week, already normal',
       'Strength I can feel, and numbers that move',
       'The bike, the freedom, money I earned',
     ],
-    lufs: -25.0,
-    truePeakDb: -3.8,
+    lufs: -25.1,
+    truePeakDb: -3.5,
     voice: 'Sulafat',
     madeAt: '2026-08-12',
   },

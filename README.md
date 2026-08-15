@@ -191,6 +191,9 @@ validator rules apply.
 
 - **`scripting`** (default) — the measured reference style. "I'm so grateful that…", "I have…",
   "I am someone who…", "It feels…". Everything present tense, spoken as already true.
+  **Affirmations only** — no body scan, no guided relaxation, no scene-setting imagery — and
+  **each affirmation is said two or three times in a row**, with a shorter gap between the
+  restatements than between clusters. See docs/AFFIRMATION-STYLE.md §2a–§2c.
 - **`process`** — the research-led style. "I am learning to…", implementation intentions,
   permitted ambivalence, believability-gated.
 

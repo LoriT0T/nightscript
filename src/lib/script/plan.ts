@@ -27,16 +27,16 @@ export const ARC: SectionSpec[] = [
     share: 4 / 60,
     pauseStart: 5,
     pauseEnd: 6,
-    label: 'Arrival',
-    purpose: 'Breath cue and permission to stop listening. No content.',
+    label: 'Opening',
+    purpose: 'The gentlest affirmations. The day is finished.',
   },
   {
     section: 'downshift',
     share: 6 / 60,
     pauseStart: 5,
     pauseEnd: 6,
-    label: 'Downshift',
-    purpose: 'Slow body scan: jaw, shoulders, hands, feet.',
+    label: 'Settling',
+    purpose: 'Quiet affirmations. No body scan — affirmations only.',
   },
   {
     section: 'core',
@@ -44,7 +44,7 @@ export const ARC: SectionSpec[] = [
     pauseStart: 3,
     pauseEnd: 5.5,
     label: 'Core affirmations',
-    purpose: 'Densest section. Primary goals. Pauses grow throughout.',
+    purpose: 'Densest section. Each affirmation said two or three times. Pauses grow throughout.',
   },
   {
     section: 'second',
@@ -59,8 +59,8 @@ export const ARC: SectionSpec[] = [
     share: 7 / 60,
     pauseStart: 7,
     pauseEnd: 8,
-    label: 'Dissolution',
-    purpose: 'Fragments rather than sentences. Sparse.',
+    label: 'Closing',
+    purpose: 'The simplest restatements. Sparse. Still affirmations, never imagery.',
   },
   {
     section: 'fade',
@@ -206,6 +206,12 @@ export const CHUNK_MAX_WORDS = 120;
 export const CHUNK_MAX_LINES = 8;
 /** A trailing chunk shorter than this is merged backwards rather than sent on its own. */
 export const MIN_TAIL_WORDS = 25;
+
+/**
+ * Floor for the gap between restatements of the same affirmation. Short enough that the
+ * three readings belong together, long enough that they are not run-on.
+ */
+export const WITHIN_CLUSTER_PAUSE_SEC = 2;
 
 export function planChunks(script: Script): Chunk[] {
   const chunks: Chunk[] = [];
@@ -363,11 +369,22 @@ export function buildTimeline(
     const totalLines = ordered.reduce((a, c) => a + c.lines.length, 0);
     const speech = ordered.reduce((a, c) => a + chunkSpeech(c), 0);
 
+    // Restatements of one affirmation are separated by a short gap; the full scheduled pause
+    // falls between clusters. Without this, "I'm so grateful that I train four times a week"
+    // and its two restatements are heard as three unrelated lines rather than one thought
+    // said three times, which is the whole point of clustering them.
+    const flat = ordered.flatMap((c) => c.lines);
     let seen = 0;
     const nominal: number[][] = ordered.map((c) => {
       const arr = c.lines.map((_, i) => {
-        const t = totalLines > 1 ? (seen + i) / (totalLines - 1) : 0;
-        return pauseSeconds(spec.section, t);
+        const globalIndex = seen + i;
+        const t = totalLines > 1 ? globalIndex / (totalLines - 1) : 0;
+        const full = pauseSeconds(spec.section, t);
+        const here = flat[globalIndex];
+        const next = flat[globalIndex + 1];
+        const sameCluster =
+          here?.clusterId != null && next?.clusterId != null && here.clusterId === next.clusterId;
+        return sameCluster ? Math.max(WITHIN_CLUSTER_PAUSE_SEC, full * 0.45) : full;
       });
       seen += c.lines.length;
       return arr;

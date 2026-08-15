@@ -78,6 +78,12 @@ export interface Line {
   text: string;
   pattern: Pattern;
   section: Section;
+  /**
+   * Lines sharing a cluster are restatements of ONE affirmation and are always spoken
+   * consecutively, with a shorter gap between them than between clusters. See
+   * docs/AFFIRMATION-STYLE.md §2a.
+   */
+  clusterId?: string;
   /** Goal this line serves; null for arrival/downshift/fade material. */
   goalId: string | null;
   /** User locked this line — regeneration must leave it alone. */

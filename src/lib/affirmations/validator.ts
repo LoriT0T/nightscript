@@ -23,8 +23,17 @@ interface Rule {
 
 interface Ctx {
   goal?: Goal;
+  /** Every goal, for relevance checking — a line may legitimately reference any of them. */
+  goals?: Goal[];
   style: WritingStyle;
 }
+
+/** Always on-topic regardless of the goal wording. */
+const UNIVERSAL_WORDS = [
+  'grateful','thankful','proud','calm','steady','strong','stronger','strength','myself','promise',
+  'promises','showing','again','today','tomorrow','morning','week','earned','trust','capable','able',
+  'enough','feels','feel','life','living','future','person','someone','people','depend','rely',
+];
 
 /** Traits people silently contradict. Deliberately broad. */
 const TRAIT_WORDS = [
@@ -139,6 +148,24 @@ const SUPERLATIVES = [
   'nothing can stop',
   'all of my',
   'any and all',
+];
+
+/**
+ * Body-sensation vocabulary. Banned outright in the scripting style — the listener wants
+ * affirmations, not guided relaxation, and lines like "my shoulders sink into the mattress"
+ * are the latter wearing the former's grammar.
+ */
+const BODY_PARTS = [
+  'jaw','face','forehead','eyes','eyelids','neck','shoulder','shoulders','arm','arms','elbow',
+  'hand','hands','finger','fingers','chest','ribs','stomach','belly','back','spine','hip','hips',
+  'thigh','thighs','knee','knees','calf','calves','leg','legs','ankle','ankles','foot','feet','toes',
+  'breath','breathing','lungs','muscles','body','limbs','head','scalp','tongue','teeth',
+];
+const SENSATION_VERBS = [
+  'sink','sinks','sinking','soften','softens','softening','relax','relaxes','relaxing','loosen',
+  'loosens','loosening','heavy','heavier','warm','warmer','melt','melts','melting','rest','rests',
+  'resting','settle','settles','settling','drop','drops','dropping','release','releases','releasing',
+  'still','quiet','limp','slack','unclench','unclenches','sag','sags','float','floats','floating',
 ];
 
 /** Shame / absolutist language forbidden on addiction and mental-health goals (§7). */
@@ -273,13 +300,71 @@ export const RULES: Rule[] = [
     },
   },
   {
-    id: 'too-long',
+    id: 'body-sensation',
+    severity: 'error',
+    styles: ['scripting'],
+    why: 'style §2b — this is a guided-relaxation line, not an affirmation. The listener asked for affirmations only: no body scans, no "my shoulders sink into the bed", no instructions to notice a sensation.',
+    test: (line) => {
+      const t = line.text.toLowerCase();
+      const part = BODY_PARTS.find((b) => new RegExp(`\\b${b}\\b`).test(t));
+      if (!part) return null;
+      const verb = SENSATION_VERBS.find((v) => new RegExp(`\\b${v}\\b`).test(t));
+      return verb ? `${part} … ${verb}` : null;
+    },
+  },
+  {
+    id: 'not-an-affirmation',
+    severity: 'error',
+    styles: ['scripting'],
+    why: 'style §2c — every line must be a first-person affirmation. Scene-setting and stray imagery ("chrome catching the sun", "fresh rubber on open road") describe a picture rather than assert anything about the listener, and read as filler.',
+    test: (line) => {
+      // A first-person SUBJECT, not merely a possessive: "cold steel on my palms" has "my"
+      // and is still just a photograph. "It feels…" is the one subjectless form the style
+      // actually uses, and it is a statement about the listener's state, so it counts.
+      if (/\b(i|i'm|i've|me)\b/i.test(line.text)) return null;
+      if (/\bit (feels|felt|is|'s)\b/i.test(line.text)) return null;
+      return 'no first-person subject';
+    },
+  },
+  {
+    id: 'off-topic',
     severity: 'warn',
+    styles: ['scripting'],
+    why: 'style §2c — the line shares no vocabulary with any stated goal, so it is probably generic filler rather than something about this listener.',
+    test: (line, ctx) => {
+      if (!ctx.goals || ctx.goals.length === 0) return null;
+      const words = new Set(
+        line.text.toLowerCase().replace(/[^a-z\s]/g, ' ').split(/\s+/).filter((w) => w.length >= 4),
+      );
+      if (words.size === 0) return null;
+      // Vocabulary the listener supplied, plus the forms that are universally on-topic.
+      const corpus = new Set<string>(UNIVERSAL_WORDS);
+      for (const g of ctx.goals) {
+        for (const field of [g.text, g.why, g.obstacle, g.evidence]) {
+          for (const w of field.toLowerCase().replace(/[^a-z\s]/g, ' ').split(/\s+/)) {
+            if (w.length >= 4) corpus.add(w);
+          }
+        }
+      }
+      for (const w of words) {
+        if (corpus.has(w)) return null;
+        // crude stem match so "training"/"trained"/"trains" all count as "train"
+        for (const c of corpus) {
+          if (c.length >= 5 && (w.startsWith(c.slice(0, 5)) || c.startsWith(w.slice(0, 5)))) return null;
+        }
+      }
+      return 'nothing in common with any goal';
+    },
+  },
+  {
+    id: 'too-long',
+    severity: 'error',
     why: 'design §10 — long sentences force breath support, which raises energy. Short falling sentences hold the arc.',
     test: (line, ctx) => {
       const words = line.text.trim().split(/\s+/).length;
       // The reference tracks sit at a median of 9 words and a 90th percentile of 14
-      // (style §2), so scripting lines are held much tighter than process ones.
+      // (style §2), so scripting lines are held much tighter than process ones. This is an
+      // error rather than a warning because as a warning it shipped a 22-word line.
       const cap = ctx.style === 'scripting' ? 16 : 26;
       return words > cap ? `${words} words` : null;
     },
@@ -313,8 +398,9 @@ export function validateLine(
   line: Line,
   goal?: Goal,
   style: WritingStyle = 'scripting',
+  goals?: Goal[],
 ): ValidationIssue[] {
-  const ctx: Ctx = { goal, style };
+  const ctx: Ctx = { goal, goals: goals ?? (goal ? [goal] : undefined), style };
   const issues: ValidationIssue[] = [];
   for (const rule of RULES) {
     if (rule.styles && !rule.styles.includes(style)) continue;
@@ -339,7 +425,7 @@ export function validateScript(
 ): ValidationIssue[] {
   const byId = new Map(goals.map((g) => [g.id, g]));
   return lines.flatMap((l) =>
-    validateLine(l, l.goalId ? byId.get(l.goalId) : undefined, style),
+    validateLine(l, l.goalId ? byId.get(l.goalId) : undefined, style, goals),
   );
 }
 

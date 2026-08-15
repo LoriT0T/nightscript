@@ -134,6 +134,7 @@ const SCRIPTING_MUST_PASS: string[] = [
   'I can lift heavier than I could last month.',
   "I'm able to get up before the house wakes.",
   'It feels good to be this strong.',
+  'I feel steady walking into the gym now.',
   'I feel steady in my own skin.',
   'I trust the work I am putting in.',
   'Money I earned is there when I need it.',
@@ -151,6 +152,16 @@ const SCRIPTING_MUST_REJECT: Array<[string, string, Partial<Line>?, Goal?]> = [
   ['My vibration is high tonight.', 'mystical'],
   ['A relapse would mean I failed.', 'sensitive-shame', { goalId: 'g1' }, goal({ sensitive: true })],
   ['My willpower is stronger than the urge.', 'sensitive-shame', { goalId: 'g1' }, goal({ sensitive: true })],
+  // Affirmations only — no guided relaxation, no scene-setting. These are the two things
+  // the listener explicitly rejected after hearing a generated track.
+  ['My shoulders sink deep into the mattress now.', 'body-sensation'],
+  ['My jaw and my face are softening right down.', 'body-sensation'],
+  ['My hands rest open against the sheets.', 'body-sensation'],
+  ['I feel my breath growing slow and heavy.', 'body-sensation'],
+  ['Cold steel on my palms.', 'not-an-affirmation'],
+  ['Chrome catching the afternoon sun.', 'not-an-affirmation'],
+  ['Fresh rubber on open road.', 'not-an-affirmation'],
+  ['The bar so light and the rubber so thick.', 'not-an-affirmation'],
   // Style rails.
   ['I will be strong one day.', 'future-tense'],
   ["Someday I'll have the life I want.", 'future-tense'],

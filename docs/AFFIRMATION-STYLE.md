@@ -52,8 +52,10 @@ Line forms, in rough order of how often they appear:
    lot to …`. The reference leans on this more than expected for a "dream life" track.
 7. **Trust / it-works-out.** `I trust …`, `everything works out …`. Short, and used as a
    breather between the denser claims.
-8. **Sensory detail of the imagined life.** Concrete objects and moments, present tense, never
-   hypothetical: the weight in the hand, the sound of the engine, the cold morning air.
+8. **Concrete detail, but always attached to a claim.** The reference grounds its lines in real
+   objects and moments — but as something the listener *has* or *does*, never as a standalone
+   picture. `I ride to work on a bike I paid for outright.` is in style; a line describing the
+   bike is not. See §2c, which is the rule this collapsed into.
 
 Sequencing: **anaphora with small mutations.** The same opening runs two to four times with the
 object changing, then the form switches. Not a shuffled list of unrelated claims — short streaks.
@@ -61,6 +63,45 @@ object changing, then the form switches. Not a shuffled list of unrelated claims
 Tense discipline: **no future tense.** The reference has essentially no `I will`. Everything the
 listener wants is spoken in the present, as a description of their life rather than a plan for
 it. This is the single biggest departure from the process style below.
+
+## 2a. Repetition — each affirmation said two or three times
+
+The listener's instruction, after hearing a generated track: say each affirmation twice or
+three times before moving to the next, adjusting slightly or adding meaning each time.
+
+So the core is not a list of separate claims. It is a small number of affirmations, each stated
+two or three times **consecutively**, marked with a shared `clusterId`. Each restatement is a
+deepening rather than a synonym swap — more specific, or naming what the thing gives them.
+
+The timeline honours the grouping: the gap **between restatements** is 45% of the scheduled
+pause with a 2-second floor, while the full growing pause falls **between clusters**. Without
+that, three readings of one thought are heard as three unrelated lines, which defeats the point.
+
+## 2b. No guided relaxation. None.
+
+The reference style is affirmations, and the listener was explicit after hearing a body scan in
+a generated track: he does not want it. No jaw, shoulders, hands, chest, breath or limbs. Nothing
+sinking, softening, loosening, growing heavy, settling or resting.
+
+This removed the entire body-scan section as a *content* type. The section survives as a *pacing*
+stage — the arc still descends in density and grows in pause length — but every line in it is an
+affirmation. Enforced by the `body-sensation` rule.
+
+## 2c. Every line is an affirmation about this listener
+
+Two failure modes, both of which shipped before being caught:
+
+- **Scene-setting.** Lines that paint a picture without asserting anything: chrome catching the
+  sun, fresh rubber on open road, a bar that feels light. They are broad, they are about nobody,
+  and the listener rejected them by name.
+- **Generic encouragement** that could appear in anyone's track.
+
+Enforced by `not-an-affirmation`: every line needs a first-person **subject** — `I`, `I'm`,
+`I've`, `me` — not merely the possessive `my`, since "cold steel on my palms" has `my` and is
+still just a photograph. The one subjectless form allowed is `It feels…`, which is a statement
+about the listener's state and is part of the measured style.
+
+`off-topic` additionally warns when a line shares no vocabulary with any stated goal.
 
 ## 3. What is kept out, and why it costs nothing
 

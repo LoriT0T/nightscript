@@ -87,46 +87,105 @@ material where you can.`,
  * spoken as a description of the life rather than a plan for it.
  */
 const SCRIPTING_BRIEF: Record<Exclude<Section, 'fade'>, (n: number) => string> = {
-  arrival: (n) => `Write ${n} ARRIVAL lines. The day is finished and being set down. Gratitude for
-the day being over, permission to stop holding it. Five to nine words. goalId null.
-Patterns: gratitude, feeling, sensory.`,
+  arrival: (n) => `Write ${n} OPENING lines. Still affirmations — the gentlest ones, about the day
+being finished and the work being done. No body sensations, no breathing instructions, no scene
+setting. goalId may be null here.`,
 
-  downshift: (n) => `Write ${n} DOWNSHIFT lines: a slow body scan moving downward — jaw, face,
-shoulders, arms, hands, chest, stomach, hips, legs, feet. One body part per line, each one
-softening or growing heavy. Five to nine words. goalId null. Pattern: sensory.
-Keep the wording plainly anatomical and calm.`,
+  downshift: (n) => `Write ${n} SETTLING lines. Still affirmations, quiet and simple. Lead with
+identity and capability — "I am someone who…", "I can…" — not with gratitude, which the opening
+already used. NO BODY SCAN: nothing about jaws, shoulders, hands, breath or limbs, and nothing
+about sinking, softening or relaxing. If you catch yourself writing a relaxation instruction,
+write an affirmation instead.`,
 
-  core: (n) => `Write ${n} CORE lines — the heart of the track, on the goals, in proportion to
-their share. This is the section that has to sound like the reference style:
+  core: (n) => `Write ${n} CORE lines — the heart of the track.
 
-  • Speak everything in the PRESENT TENSE, as already true. No "I will", no "one day",
-    no "I am learning to". The life is described, not promised.
-  • Lead often with GRATITUDE, varying only the intensifier: "I'm so grateful that…",
-    "I'm really grateful for…", "I'm grateful my…".
-  • Use PRESENT-TENSE POSSESSION: "I have…". Use IDENTITY: "I am someone who…", "I am a…".
-  • Use CAPABILITY: "I can…", "I'm able to…".
-  • NAME THE FEELING the state produces: "It feels…", "I feel…". This matters — the feeling
-    is what they are actually reaching for, not the object.
-  • Include RECIPROCITY: what they are to the people around them, who can rely on them.
-  • Include TRUST lines as breathers: "I trust…", "things are working out…".
-  • Include SENSORY detail of the imagined life — specific objects, weights, sounds, air,
-    moments. Present tense, never hypothetical.
-  • Run the same opening two to four times with the object changing, then switch form.
-    Streaks, not a shuffled list.
+COVER EVERY GOAL. Allocate clusters across the goals in proportion to their share. No goal may
+be skipped and no goal may take over the section. If there are three goals, at least one cluster
+belongs to each.
 
-Nine words is the target length. Fourteen is the ceiling.`,
+VARY THE FORM. At most HALF the clusters may open with gratitude. The rest must open with the
+other forms — "I have…", "I am someone who…", "I can…", "I'm able to…", "It feels…", "I trust…".
+A section where every line begins "I'm so grateful" is a failed section.
 
-  second: (n) => `Write ${n} SECOND-PASS lines: the same ideas as the core, softer and shorter,
-weighted to gratitude and to naming the feeling. Seven to eleven words. Carry the goalId.
-Still present tense.`,
+Nine words a line. Fourteen is the hard ceiling — a line longer than that must be split into two
+restatements of the same cluster instead.`,
 
-  dissolution: (n) => `Write ${n} DISSOLUTION lines. Fragments, not sentences. Three to six words.
-Present tense, warm, concrete. These are the last IMAGES OF THE LIFE thinning out as sleep
-arrives — objects and moments from their goals, not descriptions of the bedroom. Draw on the
-specific things they mentioned. goalId null. Avoid anything that could read as a body
-description out of context.`,
+  second: (n) => `Write ${n} SECOND-PASS lines: the same material as the core, softer and shorter,
+leading with how it FEELS rather than with gratitude — "It feels…", "I feel…", "I can…". Cover
+the same goals the core covered. Still present tense. Carry the goalId. Seven to eleven words.`,
+
+  dissolution: (n) => `Write ${n} CLOSING lines. Short affirmations, five to nine words, the
+simplest possible restatements of what the track has been saying. Still full first-person
+affirmations — NOT scene fragments, NOT imagery. "Cold steel on my palms" and "chrome catching
+the sun" are exactly what this must not be.`,
 };
 
+const SCRIPTING_RULES = `═══ THE STYLE. This is the part that matters most. ═══
+
+Write in the voice of a first-person affirmation track: the listener describing their life as it
+already is. Measured from the reference tracks they gave: median nine words a line, first person
+throughout, present tense throughout, gratitude the densest single marker.
+
+═══ RULE 1 — EVERY LINE IS AN AFFIRMATION ═══
+
+There is no guided relaxation in this track. Not one line.
+
+  ✗ NEVER write body sensations or relaxation instructions. No jaw, shoulders, arms, hands,
+    chest, stomach, hips, legs, feet, breath, muscles. Nothing sinking, softening, relaxing,
+    loosening, growing heavy, settling or resting.
+  ✗ NEVER write scene-setting or free-floating imagery. A line that paints a picture without
+    asserting something about the listener is not an affirmation. "Cold steel on my palms",
+    "chrome catching the afternoon sun", "the bar feels light and the rubber feels thick" — all
+    forbidden. They are broad, they are about nothing, and they are not wanted.
+  ✓ EVERY line contains a first-person subject: "I", "I'm", "I've" or "me" — not merely "my".
+    The one exception is an "It feels…" line, which is a statement about how their life feels.
+
+═══ RULE 2 — SAY EACH AFFIRMATION TWO OR THREE TIMES ═══
+
+Do not write a list of separate affirmations. Write a small number of affirmations, each stated
+TWO OR THREE TIMES IN A ROW, and mark each group with the same "cluster" number.
+
+Each restatement says the same thing again, slightly differently — a shade more specific, or
+naming what it gives them. Not a synonym swap; a deepening.
+
+  cluster 1: I'm so grateful that I train four times a week.
+  cluster 1: I'm so grateful that four times a week is just what I do now.
+  cluster 1: I'm so grateful that showing up stopped being a decision.
+
+  cluster 2: I have the strength to finish the last hard set.
+  cluster 2: I have the strength to stay under the bar when it burns.
+
+Three restatements for the important goals, two for the rest.
+
+═══ RULE 3 — EVERY LINE IS ABOUT THIS LISTENER ═══
+
+Use their own words, their own goals, their own evidence, their own obstacle. A line that could
+appear in anyone's affirmation track is a failed line. No generic encouragement.
+
+═══ THE FORMS, and the label to give each line ═══
+  gratitude    "I'm so grateful that…" / "I'm really grateful for…"   ← use most
+  having       "I have…"                — the thing, already had
+  identity     "I am someone who…" / "I am a…"
+  capability   "I can…" / "I'm able to…"
+  feeling      "It feels…" / "I feel…"  — name what the state gives them
+  reciprocity  what they are to their people; who can depend on them
+  trust        "I trust…" — short breathers
+  evidence     something real they told you, spoken in the present
+
+═══ ALSO BANNED ═══
+  • Second person: no "you", "your", "yourself".
+  • Future tense: no "I will", "I'll", "one day", "someday".
+  • Process hedging: no "I am learning to", "I am trying to", "little by little".
+  • Universe / manifest / abundance / vibration / attract / law of attraction / divine /
+    prosperity / millionaire. The reference tracks contain NONE of this vocabulary.
+  • Exclamation marks. Question marks. Interrogative phrasing.
+  • Hype and motivational-speaker cadence.
+
+Money, the body's strength and possessions are fair subjects — spoken plainly and concretely as
+earned, present and used, never metaphysically, and always as something the listener HAS or IS,
+never as a picture of an object.
+
+Nine words is the target length. Fourteen is the ceiling.`;
 
 const PROCESS_RULES = `═══ THE RULES. These are not style preferences; they come from the research. ═══
 
@@ -155,43 +214,6 @@ THE PATTERNS. Every line is exactly one of these, and you will label it:
 VOICE: short sentences, every one falling at the end. Plain and sincere. No therapist lilt, no
 poetry, no metaphor-stacking, no "journey", "embrace", "radiant", "flow". Contractions fine.
 No stage directions, no bracketed tags, no numbering inside the text.`;
-
-const SCRIPTING_RULES = `═══ THE STYLE. This is the part that matters most. ═══
-
-Write in the voice of a first-person affirmation track: the listener describing their life as it
-already is. Measured from the reference tracks they gave: median nine words a line, first person
-throughout, present tense throughout, gratitude the densest single marker.
-
-REQUIRED:
-  • First person, singular, PRESENT TENSE. Everything spoken as already true.
-  • Short. Nine words is the target, fourteen the hard ceiling.
-  • Every sentence falls at the end. Plain words.
-  • Vary the form in streaks: two to four lines sharing an opening, then change.
-
-THE FORMS, and the label to give each line:
-  gratitude    "I'm so grateful that…" / "I'm really grateful for…"   ← use most
-  having       "I have…"                — the thing, already had
-  identity     "I am someone who…" / "I am a…"
-  capability   "I can…" / "I'm able to…"
-  feeling      "It feels…" / "I feel…"  — name what the state feels like
-  reciprocity  what they are to their people; who can depend on them
-  trust        "I trust…" / "things are working out…"  — short breathers
-  sensory      concrete detail of the life: objects, weight, sound, air, morning cold
-  evidence     something real they told you, spoken in the present
-  intention    "When <specific cue>, I <specific action>."  — use sparingly here
-
-BANNED, without exception:
-  • Second person. No "you", "your", "yourself".
-  • Future tense outside an intention line: no "I will", "I'll", "one day", "someday".
-  • Process hedging: no "I am learning to", "I am trying to", "little by little".
-  • Universe / manifest / abundance / vibration / attract / law of attraction / divine /
-    prosperity / millionaire. The reference tracks contain NONE of this vocabulary — it is not
-    part of the style, and it is not wanted.
-  • Exclamation marks. Question marks. Any interrogative phrasing.
-  • Hype, superlatives stacked for effect, motivational-speaker cadence.
-
-Money, the body and possessions are all fair subjects. Speak of them plainly and concretely —
-earned, present, used, enjoyed — never metaphysically.`
 
 export function sectionLineTarget(minutes: number, section: Section): number {
   const counts = targetLineCounts(minutes);
@@ -252,12 +274,25 @@ Write exactly ${wanted} lines.${variantNote ? ` ${variantNote}` : ''}
 
 Return ONLY a JSON object, no prose, no markdown fences:
 
-{"lines":[{"text":"…","pattern":"${scripting ? 'gratitude' : 'process'}","section":"${section}","goalId":"<goal id or null>"}]}
+{"lines":[{"text":"…","pattern":"${scripting ? 'gratitude' : 'process'}","section":"${section}","goalId":"<goal id or null>"${scripting ? ',"cluster":1' : ''}}]}
 
 pattern ∈ ${scripting ? 'gratitude|having|identity|capability|feeling|reciprocity|trust|sensory|evidence|intention' : 'process|evidence|compassion|values|intention|ambivalence|sensory'}
-Every line must have section "${section}".
+Every line must have section "${section}".${
+    scripting
+      ? '\nGroup restatements of the same affirmation under the same "cluster" number, consecutive in the array.'
+      : ''
+  }
 goalId must be one of the ids given above, or null.`;
 }
+
+/**
+ * Label a scripting line by its actual grammatical form.
+ *
+ * The model reliably writes the right *shape* and then labels almost every line `process`,
+ * whatever the enum says. The labels are not decoration — they drive the editor's display and
+ * the second-pass emphasis — and the form is trivially detectable from the opening, so it is
+ * read off the text rather than taken on trust. See docs/AFFIRMATION-STYLE.md §2.
+ */
 
 /**
  * Label a scripting line by its actual grammatical form.
@@ -323,7 +358,17 @@ export function parseScriptJson(raw: string, goals: Goal[]): Line[] {
       const pattern = PATTERN_SET.has(l.pattern as Pattern) ? (l.pattern as Pattern) : 'process';
       const rawGoal = typeof l.goalId === 'string' ? l.goalId : null;
       const goalId = rawGoal && goalIds.has(rawGoal) ? rawGoal : null;
-      return { id: `l${i}_${Math.random().toString(36).slice(2, 8)}`, text, pattern, section, goalId };
+      const cluster = l.cluster;
+      const clusterId =
+        cluster === undefined || cluster === null ? undefined : `c${String(cluster)}`;
+      return {
+        id: `l${i}_${Math.random().toString(36).slice(2, 8)}`,
+        text,
+        pattern,
+        section,
+        goalId,
+        clusterId,
+      };
     })
     .filter((l): l is Line => l !== null);
 }
