@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { Button, Field, Note, Shell, Slider, TextArea } from '@/components/ui';
@@ -50,7 +50,9 @@ export default function NewTrackPage() {
   const update = (id: string, patch: Partial<Goal>) =>
     setGoals((gs) => gs.map((g) => (g.id === id ? { ...g, ...patch } : g)));
 
-  const complete = goals.filter((g) => g.text.trim() && g.why.trim());
+  // Only the goal itself is required. The follow-ups sharpen the writing when answered and
+  // are simply skipped when they are not — the prompt is built from whatever is present.
+  const complete = goals.filter((g) => g.text.trim());
   const canContinue = complete.length > 0;
 
   async function start() {
@@ -167,7 +169,7 @@ function GoalForm({
         )}
       </div>
 
-      <Field label="What do I want to work on?" hint="Your words, not tidy ones.">
+      <Field label="What do I want to work on?" hint="Your words, not tidy ones. This is the only one that is required.">
         <TextArea
           value={goal.text}
           onChange={(v) => onChange({ text: v })}
@@ -178,7 +180,7 @@ function GoalForm({
 
       <Field
         label="Why does this matter to me?"
-        hint="What it is in service of. This becomes the lines about what you value, which work even on nights when nothing else lands."
+        hint="Optional. What it is in service of — it becomes the lines about what you value."
       >
         <TextArea
           value={goal.why}
@@ -190,7 +192,7 @@ function GoalForm({
 
       <Field
         label="What specifically gets in the way?"
-        hint="Be concrete — a time, a place, a feeling. This becomes the 'when X, I do Y' lines, which are the part with the strongest evidence behind them."
+        hint="Optional. Be concrete — a time, a place, a feeling. It becomes the lines about the moment it gets hard."
       >
         <TextArea
           value={goal.obstacle}
@@ -202,7 +204,7 @@ function GoalForm({
 
       <Field
         label="When did I handle this well before?"
-        hint="Any time at all, however small. Your own evidence is what stops a line sounding like a lie."
+        hint="Optional, and worth answering — your own evidence is what stops a line sounding like a lie."
       >
         <TextArea
           value={goal.evidence}
@@ -344,6 +346,9 @@ function VoiceStep({
 }) {
   const [available, setAvailable] = useState<string[] | null>(null);
   const [playing, setPlaying] = useState<string | null>(null);
+  // One element for every audition, so starting a new sample stops the old one instead of
+  // layering two voices over each other, and so a sample can be stopped at all.
+  const previewRef = useRef<HTMLAudioElement | null>(null);
 
   useEffect(() => {
     fetch(asset('/auditions/index.json'))
@@ -352,20 +357,44 @@ function VoiceStep({
       .catch(() => setAvailable([]));
   }, []);
 
+  function stopPreview() {
+    const el = previewRef.current;
+    if (el) {
+      el.pause();
+      el.currentTime = 0;
+    }
+    setPlaying(null);
+  }
+
   function audition(name: string) {
-    const el = new Audio(asset(`/auditions/${name}.m4a`));
-    setPlaying(name);
+    // Second press on the same voice stops it; pressing another voice switches to it.
+    if (playing === name) {
+      stopPreview();
+      return;
+    }
+    stopPreview();
+    const el = previewRef.current ?? new Audio();
+    previewRef.current = el;
+    el.src = asset(`/auditions/${name}.m4a`);
     el.onended = () => setPlaying(null);
+    setPlaying(name);
     el.play().catch(() => setPlaying(null));
   }
+
+  // Leaving the step should not leave a voice talking.
+  useEffect(() => () => {
+    previewRef.current?.pause();
+    previewRef.current = null;
+  }, []);
 
   return (
     <div className="space-y-8">
       <div>
         <h2 className="text-sm text-ink-300">Voice</h2>
         <p className="mt-1 text-xs leading-relaxed text-ink-400">
-          Every female-presenting voice the API offers, reading the same passage. Listen rather
-          than take my word for it. The default is the warmest and lowest-energy of them.
+          Every female-presenting voice the API offers, reading the same passage. Press play to
+          hear one, press again to stop it, or press another to switch straight to that one.
+          The default is the warmest and lowest-energy of them.
         </p>
         <ul className="mt-4 space-y-1">
           {AUDITION_VOICES.map((v) => {
@@ -389,9 +418,24 @@ function VoiceStep({
                     <span className="mt-0.5 block text-xs leading-relaxed text-ink-500">{v.note}</span>
                   )}
                 </button>
-                <Button variant="quiet" onClick={() => audition(v.name)} disabled={!has}>
-                  {playing === v.name ? 'playing' : has ? 'hear it' : '—'}
-                </Button>
+                <button
+                  onClick={() => audition(v.name)}
+                  disabled={!has}
+                  aria-label={playing === v.name ? `Stop ${v.name}` : `Play ${v.name}`}
+                  className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-ink-700 text-ink-300 disabled:opacity-30"
+                >
+                  {playing === v.name ? (
+                    <span className="flex gap-1">
+                      <span className="block h-3.5 w-1 rounded-sm bg-ink-300" />
+                      <span className="block h-3.5 w-1 rounded-sm bg-ink-300" />
+                    </span>
+                  ) : (
+                    <span
+                      className="ml-0.5 block h-0 w-0 border-y-[7px] border-l-[11px] border-y-transparent"
+                      style={{ borderLeftColor: 'var(--color-ink-300)' }}
+                    />
+                  )}
+                </button>
               </li>
             );
           })}

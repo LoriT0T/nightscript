@@ -259,6 +259,9 @@ A real 60-minute track, generated on the hosted app from a three-goal intake (20
   See docs/GEMINI-TTS.md §6.
 - **Chunk size is a cache key.** Changing `CHUNK_TARGET_WORDS` invalidates every previously
   generated chunk. Against a 100-per-day cap that is the expensive kind of tidying.
+- **MP3 must not be encoded at 32 kbps.** Below 44.1 kHz the encoder emits correctly-sized
+  frames that decode to silence. 48 kbps is used, and `encodeMp3` now proves the settings are
+  audible on a known sine before it will render a track. See src/lib/audio/mp3.ts.
 - **MP3, not Opus.** The brief asked for Opus in WebM/CAF with an AAC fallback. That needs
   WebCodecs plus a container muxer, and Safari's encoder support is the exact thing the
   fallback existed to protect against. MP3 at 32 kbps mono is 14.4 MB an hour — inside the

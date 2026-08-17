@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { assembleInBrowser, type ChunkPcm } from '@/lib/audio/webaudio';
 import { encodeMp3 } from '@/lib/audio/mp3';
 import { buildTimeline, planChunks } from '@/lib/script/plan';
+import { asset } from '@/lib/paths';
 import type { Script, TrackSettings } from '@/lib/types';
 
 /**
@@ -22,7 +23,9 @@ export default function DevScale() {
 
   async function runScale(minutes = 60) {
     const t0 = performance.now();
-    const res = await fetch('/_scale.json');
+    // Must go through asset(): a GitHub project page is served from a subdirectory, so a
+    // bare absolute path resolves to the wrong origin root.
+    const res = await fetch(asset('/_scale.json'));
     if (!res.ok) {
       throw new Error(
         'Missing public/_scale.json. Create it with: node -e "const s=require(\'./out/track.script.json\');require(\'fs\').writeFileSync(\'public/_scale.json\',JSON.stringify({script:s}))"',
@@ -61,7 +64,37 @@ export default function DevScale() {
 
     const settings: TrackSettings = { voice: 'Sulafat', bed: 'pink', bedLevelDb: -34, minutes };
     const assembled = await assembleInBrowser({ plays, audio, settings, onProgress: say });
+
+    // Is there actually sound in the assembled signal, before encoding?
+    let sum = 0;
+    let peak = 0;
+    for (let i = 0; i < assembled.samples.length; i++) {
+      const v = assembled.samples[i];
+      sum += v * v;
+      const a = v < 0 ? -v : v;
+      if (a > peak) peak = a;
+    }
+    const assembledRmsDb = 20 * Math.log10(Math.sqrt(sum / assembled.samples.length) || 1e-12);
+    const assembledPeakDb = 20 * Math.log10(peak || 1e-12);
+
     const { blob } = await encodeMp3(assembled.samples, assembled.sampleRate);
+
+    // And does it survive the encoder? Decoding the blob back is the only check that covers
+    // the whole path the listener actually hears.
+    const ctx = new AudioContext();
+    const decoded = await ctx.decodeAudioData(await blob.arrayBuffer());
+    const ch = decoded.getChannelData(0);
+    let dsum = 0;
+    let dpeak = 0;
+    for (let i = 0; i < ch.length; i++) {
+      const v = ch[i];
+      dsum += v * v;
+      const a = v < 0 ? -v : v;
+      if (a > dpeak) dpeak = a;
+    }
+    const decodedRmsDb = 20 * Math.log10(Math.sqrt(dsum / ch.length) || 1e-12);
+    const decodedPeakDb = 20 * Math.log10(dpeak || 1e-12);
+    await ctx.close();
 
     const m = assembled.measurement;
     const mem = (performance as unknown as { memory?: { usedJSHeapSize: number } }).memory;
@@ -79,6 +112,11 @@ export default function DevScale() {
       monotonicAfterMin4: m.monotonicAfterMin4,
       mp3Bytes: blob.size,
       mp3MB: +(blob.size / 1e6).toFixed(2),
+      assembledRmsDb: +assembledRmsDb.toFixed(2),
+      assembledPeakDb: +assembledPeakDb.toFixed(2),
+      decodedRmsDb: +decodedRmsDb.toFixed(2),
+      decodedPeakDb: +decodedPeakDb.toFixed(2),
+      decodedSec: +decoded.duration.toFixed(1),
       heapMB: mem ? +(mem.usedJSHeapSize / 1e6).toFixed(0) : null,
       wallSec: +((performance.now() - t0) / 1000).toFixed(1),
     };

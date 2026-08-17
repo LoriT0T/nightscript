@@ -22,12 +22,23 @@ function goalBlock(g: Goal, i: number): string {
           `present-tense claim is allowed only when it is anchored to their evidence below.`
         : `${g.believability}/10 — HIGH. Stronger framings are safe here, but still never absolute.`;
 
+  // Only the goal text is required in intake, so any of the follow-ups may be blank. Print
+  // the ones that were answered and say nothing about the rest — an empty label reads to the
+  // model as "they have no reason", which is worse than silence.
   return [
     `GOAL ${i + 1} (id: ${g.id}, share of track: ${g.weight})`,
     `  In their words: ${g.text}`,
-    `  Why it matters to them (use for VALUES lines): ${g.why}`,
-    `  What gets in the way (use for IMPLEMENTATION INTENTION cues): ${g.obstacle}`,
-    `  A time they handled it well (use verbatim detail for EVIDENCE lines): ${g.evidence}`,
+    g.why.trim() ? `  Why it matters to them (use for VALUES lines): ${g.why}` : '',
+    g.obstacle.trim()
+      ? `  What gets in the way (use for IMPLEMENTATION INTENTION cues): ${g.obstacle}`
+      : '',
+    g.evidence.trim()
+      ? `  A time they handled it well (use verbatim detail for EVIDENCE lines): ${g.evidence}`
+      : '',
+    !g.why.trim() && !g.obstacle.trim() && !g.evidence.trim()
+      ? `  They gave only the goal itself. Write from it directly, and do NOT invent a backstory,
+     an obstacle or a past success they did not tell you.`
+      : '',
     `  Believability: ${belief}`,
     g.sensitive
       ? `  ⚠ SENSITIVE (addiction / mental health). Urge-surfing and implementation-intention ` +
